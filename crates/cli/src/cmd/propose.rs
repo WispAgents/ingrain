@@ -48,12 +48,15 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         ..Default::default()
     };
     let (mut proposals, stats) = propose::propose(&corrections, &hunks, &opts)?;
-    // A rejected rule must not come back under another id.
-    let rejected: Vec<serde_yaml::Value> = super::review::rejected(&repo)?
+    // A rule that is already accepted, pending or rejected must not come back under another id.
+    let mut known: Vec<serde_yaml::Value> = super::review::rejected(&repo)?
         .iter()
         .filter_map(|r| rule_body(&r.rule))
         .collect();
-    proposals.retain(|p| rule_body(&p.rule.to_yaml()).is_none_or(|b| !rejected.contains(&b)));
+    for r in repo.accepted()?.into_iter().chain(repo.pending()?) {
+        known.extend(rule_body(&r.to_yaml()));
+    }
+    proposals.retain(|p| rule_body(&p.rule.to_yaml()).is_none_or(|b| !known.contains(&b)));
     println!(
         "{} corrections, {} clusters with {}+ fixes → {} rules from templates, {} from the model ({} tried, {} errors)",
         stats.corrections,
@@ -74,7 +77,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         }
         let path = repo
             .layout
-            .rule_path(&repo.layout.pending_dir(), &p.rule.id);
+            .rule_path(&repo.layout.pending_dir(), &p.rule.id)?;
         p.rule.save(&path)?;
         let precision = p
             .score

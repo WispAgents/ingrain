@@ -6,7 +6,7 @@ use crate::backtest;
 use crate::cluster;
 use crate::propose::{self, ProposeOptions, ProposeStats};
 use anyhow::Result;
-use ingrain_core::{AgentHunk, Correction, LineRange};
+use ingrain_core::{AgentHunk, Correction};
 use ingrain_engine::{Parsed, lang};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -154,6 +154,10 @@ pub fn evaluate(
 
     let test_hunks: Vec<&AgentHunk> = hunks.iter().filter(|h| h.time >= cutoff).collect();
     report.test_agent_hunks = test_hunks.len();
+    let all = backtest::by_id(corrections);
+    let known = |t: i64| t >= cutoff;
+    // Relevance is per rule, so the cache is keyed by rule id + correction id.
+    let mut relevance: HashMap<String, HashMap<String, bool>> = HashMap::new();
     let mut durations = Vec::new();
     for (n, h) in test_hunks.iter().enumerate() {
         let Some(language) = lang::detect(&h.path) else {
@@ -169,38 +173,34 @@ pub fn evaluate(
         }
         let started = Instant::now();
         let parsed = Parsed::new(language, &h.snippet.text);
-        let mut hits = Vec::new();
-        for p in &applicable {
-            for hit in p.compiled.scan(&parsed) {
-                hits.push((p.rule.id.clone(), hit));
-            }
-        }
+        let judged: Vec<(&String, backtest::Judged)> = applicable
+            .iter()
+            .map(|p| {
+                let relevant = relevance.entry(p.rule.id.clone()).or_default();
+                let j = backtest::judge(&p.compiled, &parsed, h, &all, &known, relevant);
+                (&p.rule.id, j)
+            })
+            .collect();
         if measure {
             durations.push(started.elapsed().as_secs_f64() * 1000.0);
         }
-        let corrected: Vec<&LineRange> = h.corrected_from(cutoff).collect();
         let lines: Vec<&str> = h.snippet.text.lines().collect();
-        for (rule, hit) in hits {
-            let range = LineRange::new(hit.start_line, hit.end_line);
-            if !range.overlaps(&h.snippet.changed) {
-                continue;
-            }
-            let is_true = corrected.iter().any(|c| c.overlaps(&range));
-            let r = per_rule.get_mut(&rule).expect("rule report");
-            if is_true {
-                r.test_true_hits += 1;
-                report.test_true_hits += 1;
-            } else {
-                r.test_false_hits += 1;
-                report.test_false_hits += 1;
-            }
-            if report.samples.len() < opts.max_samples {
+        for (rule, j) in judged {
+            let r = per_rule.get_mut(rule).expect("rule report");
+            r.test_true_hits += j.true_hits();
+            r.test_false_hits += j.false_hits();
+            report.test_true_hits += j.true_hits();
+            report.test_false_hits += j.false_hits();
+            for (line, is_true) in j.hits {
+                if report.samples.len() >= opts.max_samples {
+                    break;
+                }
                 report.samples.push(HitSample {
-                    rule,
+                    rule: rule.clone(),
                     commit: h.commit.chars().take(10).collect(),
                     path: h.path.clone(),
                     line: lines
-                        .get(hit.start_line as usize - 1)
+                        .get(line as usize - 1)
                         .map(|l| l.trim().chars().take(160).collect())
                         .unwrap_or_default(),
                     corrected: is_true,

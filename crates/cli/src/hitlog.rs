@@ -29,6 +29,9 @@ pub struct Entry {
     pub context: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The matched code, which identifies a violation across line shifts.
+    #[serde(default)]
+    pub matched: String,
 }
 
 pub fn now() -> i64 {
@@ -61,18 +64,22 @@ impl RuleStats {
     }
 }
 
-/// Per-rule counts. The same (rule, path, line) seen by several checks in one
-/// minute (post-edit, then stop) counts once.
+/// Per-rule counts of distinct violations: the same matched code in the same file
+/// counts once however many checks see it (every edit re-checks the whole file).
 pub fn stats(path: &Path) -> Result<BTreeMap<String, RuleStats>> {
     let entries: Vec<Entry> = store::read(path)?;
     let mut seen = std::collections::HashSet::new();
     let mut out: BTreeMap<String, RuleStats> = BTreeMap::new();
     for e in entries {
+        let what = if e.matched.is_empty() {
+            e.line.to_string()
+        } else {
+            e.matched.clone()
+        };
         let key = (
             e.rule.clone(),
             e.path.clone(),
-            e.line,
-            e.time / 60,
+            what,
             format!("{:?}", e.event),
         );
         if !seen.insert(key) {
@@ -87,4 +94,41 @@ pub fn stats(path: &Path) -> Result<BTreeMap<String, RuleStats>> {
         s.last_seen = s.last_seen.max(e.time);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(line: u32, matched: &str, time: i64) -> Entry {
+        Entry {
+            time,
+            rule: "r".into(),
+            path: "a.ts".into(),
+            line,
+            mode: Mode::Shadow,
+            event: Event::Hit,
+            context: "hook".into(),
+            reason: None,
+            matched: matched.into(),
+        }
+    }
+
+    #[test]
+    fn one_violation_seen_by_many_checks_counts_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hits.jsonl");
+        // The same fetch, re-checked on every edit while lines shift around it.
+        append(
+            &path,
+            &[
+                entry(3, "fetch(u)", 0),
+                entry(5, "fetch(u)", 120),
+                entry(9, "fetch(u)", 600),
+            ],
+        )
+        .unwrap();
+        append(&path, &[entry(2, "fetch(v)", 700)]).unwrap();
+        assert_eq!(stats(&path).unwrap()["r"].hits, 2);
+    }
 }

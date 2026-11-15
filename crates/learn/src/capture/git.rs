@@ -4,7 +4,7 @@ use super::snippet::{self, CONTEXT};
 use crate::agents::{Author, Classifier};
 use anyhow::Result;
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use ingrain_core::diff::{self, FileDiff, Hunk};
+use ingrain_core::diff::{FileDiff, Hunk};
 use ingrain_core::{AgentHunk, CorrectedLines, Correction, Git, LineRange, Source};
 use ingrain_engine::lang;
 use rayon::prelude::*;
@@ -63,11 +63,11 @@ pub struct MineStats {
     pub human_commits: usize,
     pub bot_commits: usize,
     /// Human commits skipped as refactors or formatter runs.
-    pub human_commits_skipped_large: usize,
+    pub human_commits_skipped: usize,
     pub hunks_blamed: usize,
     pub corrections: usize,
     pub agent_hunks: usize,
-    pub agent_commits_skipped_large: usize,
+    pub agent_commits_skipped: usize,
 }
 
 #[derive(Debug, Default)]
@@ -132,7 +132,7 @@ pub fn mine(git: &Git, opts: &GitMineOptions) -> Result<GitMine> {
     let mut corrections = Vec::new();
     let mut links = Vec::new();
     for r in results {
-        stats.human_commits_skipped_large += usize::from(r.skipped_large);
+        stats.human_commits_skipped += usize::from(r.skipped);
         stats.hunks_blamed += r.hunks_blamed;
         corrections.extend(r.corrections);
         links.extend(r.links);
@@ -156,7 +156,7 @@ pub fn mine(git: &Git, opts: &GitMineOptions) -> Result<GitMine> {
         .collect();
     let mut agent_hunks = Vec::new();
     for (hunks, skipped) in agent_results {
-        stats.agent_commits_skipped_large += usize::from(skipped);
+        stats.agent_commits_skipped += usize::from(skipped);
         agent_hunks.extend(hunks);
     }
 
@@ -184,7 +184,7 @@ struct Ctx<'a> {
 struct HumanResult {
     corrections: Vec<Correction>,
     links: Vec<Link>,
-    skipped_large: bool,
+    skipped: bool,
     hunks_blamed: usize,
 }
 
@@ -196,23 +196,14 @@ impl Ctx<'_> {
 
     fn diff(&self, parent: &str, commit: &str) -> Vec<FileDiff> {
         self.git
-            .try_run(&[
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                "-U0",
-                "-M",
-                parent,
-                commit,
-            ])
-            .map(|t| diff::parse(&t))
+            .diff_revs(&[parent, commit], None)
             .unwrap_or_default()
     }
 
     fn mine_human(&self, commit: &Commit) -> HumanResult {
         let mut out = HumanResult::default();
         if is_formatting(&commit.subject) {
-            out.skipped_large = true;
+            out.skipped = true;
             return out;
         }
         let parent = commit
@@ -226,7 +217,7 @@ impl Ctx<'_> {
             .map(|h| (h.old_len + h.new_len) as usize)
             .sum();
         if files.len() > self.opts.max_files || changed > self.opts.max_changed_lines {
-            out.skipped_large = true;
+            out.skipped = true;
             return out;
         }
 
@@ -261,10 +252,10 @@ impl Ctx<'_> {
                 continue;
             };
             for hunk in hunks {
-                if let Some((correction, link)) =
+                if let Some((correction, links)) =
                     self.correction(commit, hunk, &origins, new_path, &before_src, &after_src)
                 {
-                    out.links.push(link);
+                    out.links.extend(links);
                     out.corrections.push(correction);
                 }
             }
@@ -295,7 +286,7 @@ impl Ctx<'_> {
         path: &str,
         before_src: &str,
         after_src: &str,
-    ) -> Option<(Correction, Link)> {
+    ) -> Option<(Correction, Vec<Link>)> {
         let old = hunk.old_range();
         // The agent commit that wrote most of the replaced lines.
         let mut per_commit: HashMap<&str, Vec<&Origin>> = HashMap::new();
@@ -304,7 +295,10 @@ impl Ctx<'_> {
                 per_commit.entry(o.sha.as_str()).or_default().push(o);
             }
         }
-        let (sha, lines) = per_commit.into_iter().max_by_key(|(_, v)| v.len())?;
+        // Ties broken by sha so repeated runs pick the same commit.
+        let (sha, lines) = per_commit
+            .into_iter()
+            .max_by_key(|(sha, v)| (v.len(), *sha))?;
         if (lines.len() as u32) * 2 < old.len() {
             return None;
         }
@@ -321,14 +315,20 @@ impl Ctx<'_> {
             fix_commit: commit.sha.clone(),
         };
         let id = Correction::make_id(path, &before, &after, &source);
-        let orig_lines: Vec<u32> = lines.iter().map(|o| o.orig_line).collect();
-        let link = Link {
-            agent_commit: agent.sha.clone(),
-            path: lines[0].filename.clone().unwrap_or_else(|| path.to_owned()),
-            lines: LineRange::new(*orig_lines.iter().min()?, *orig_lines.iter().max()?),
-            time: commit.time,
-            correction: id.clone(),
-        };
+        let path_at_agent = lines[0].filename.clone().unwrap_or_else(|| path.to_owned());
+        let mut orig_lines: Vec<u32> = lines.iter().map(|o| o.orig_line).collect();
+        orig_lines.sort_unstable();
+        // One link per contiguous run, so lines the agent didn't write aren't marked corrected.
+        let links = runs(&orig_lines)
+            .into_iter()
+            .map(|lines| Link {
+                agent_commit: agent.sha.clone(),
+                path: path_at_agent.clone(),
+                lines,
+                time: commit.time,
+                correction: id.clone(),
+            })
+            .collect();
         let correction = Correction {
             id,
             path: path.to_owned(),
@@ -340,7 +340,7 @@ impl Ctx<'_> {
             time: commit.time,
             note: Some(commit.subject.clone()),
         };
-        Some((correction, link))
+        Some((correction, links))
     }
 
     /// Added code of one agent commit, split into chunks, with corrected lines attached.
@@ -432,24 +432,50 @@ fn cosmetic_only(h: &Hunk) -> bool {
 }
 
 /// Commits that only run a formatter. Their hunks are not corrections.
+/// Tool names must be whole words ("Remove blacklist check" is not a `black` run).
 fn is_formatting(subject: &str) -> bool {
     let s = subject.to_lowercase();
-    [
+    let words: Vec<&str> = s
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let tools = [
         "black",
         "prettier",
         "isort",
-        "ruff format",
         "rustfmt",
         "gofmt",
-        "biome format",
         "reformat",
-        "formatting",
-        "run format",
+        "reformatted",
+        "autoformat",
+    ];
+    let phrases = [
+        "ruff format",
+        "biome format",
         "cargo fmt",
         "go fmt",
-    ]
-    .iter()
-    .any(|k| s.contains(k))
+        "run format",
+        "apply formatting",
+        "fix formatting",
+        "formatting changes",
+        "code formatting",
+    ];
+    words.iter().any(|w| tools.contains(w))
+        || phrases.iter().any(|p| s.contains(p))
+        || s.starts_with("style:")
+        || s.starts_with("format")
+}
+
+/// Contiguous runs in sorted line numbers.
+fn runs(sorted: &[u32]) -> Vec<LineRange> {
+    let mut out: Vec<LineRange> = Vec::new();
+    for &line in sorted {
+        match out.last_mut() {
+            Some(r) if line <= r.end + 1 => r.end = r.end.max(line),
+            _ => out.push(LineRange::new(line, line)),
+        }
+    }
+    out
 }
 
 fn build_globs(patterns: &[String]) -> Result<GlobSet> {
@@ -501,14 +527,14 @@ fn log(git: &Git, opts: &GitMineOptions, classifier: &Classifier) -> Result<Vec<
 
 /// Where a blamed line came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Origin {
-    sha: String,
-    orig_line: u32,
-    filename: Option<String>,
+pub(crate) struct Origin {
+    pub(crate) sha: String,
+    pub(crate) orig_line: u32,
+    pub(crate) filename: Option<String>,
 }
 
 /// Parse `git blame --porcelain` into final line → origin.
-fn parse_blame(text: &str) -> HashMap<u32, Origin> {
+pub(crate) fn parse_blame(text: &str) -> HashMap<u32, Origin> {
     let mut filenames: HashMap<String, String> = HashMap::new();
     let mut lines: Vec<(u32, String, u32)> = Vec::new();
     let mut current: Option<(String, u32, u32)> = None;
@@ -583,7 +609,14 @@ mod tests {
         )));
         assert!(!cosmetic_only(&h(&["fetch(u)"], &["api.get(u)"])));
         assert!(is_formatting("Run black formatter"));
+        assert!(is_formatting("style: prettier"));
         assert!(!is_formatting("Fix permission check"));
+        assert!(!is_formatting("Remove blacklist check"));
+        assert!(!is_formatting("Fix date formatting bug"));
+        assert_eq!(
+            runs(&[3, 4, 5, 9, 10]),
+            vec![LineRange::new(3, 5), LineRange::new(9, 10)]
+        );
     }
 
     #[test]

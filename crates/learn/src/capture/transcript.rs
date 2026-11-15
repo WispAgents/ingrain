@@ -37,16 +37,11 @@ pub fn session_files(projects_dir: &Path, repo_root: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// Claude Code's project directory name: every non-alphanumeric character becomes `-`.
 fn encode(path: &Path) -> String {
     path.to_string_lossy()
         .chars()
-        .map(|c| {
-            if c == '/' || c == '.' || c == '\\' || c == ':' {
-                '-'
-            } else {
-                c
-            }
-        })
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
 }
 
@@ -86,6 +81,11 @@ fn events(record: &Value) -> Vec<Event> {
         .unwrap_or(0);
     let message = record.get("message");
     let content = message.and_then(|m| m.get("content"));
+    // Subagent threads, harness notes and compaction summaries aren't the human talking.
+    let flagged = |k: &str| record.get(k).and_then(Value::as_bool).unwrap_or(false);
+    if flagged("isSidechain") || flagged("isMeta") || flagged("isCompactSummary") {
+        return Vec::new();
+    }
     match record.get("type").and_then(Value::as_str) {
         Some("user") => human_text(content).map(Event::Human).into_iter().collect(),
         Some("assistant") => content
@@ -301,5 +301,6 @@ mod tests {
     #[test]
     fn encodes_project_dir() {
         assert_eq!(encode(Path::new("/Users/me/my.repo")), "-Users-me-my-repo");
+        assert_eq!(encode(Path::new("/w/my_repo x")), "-w-my-repo-x");
     }
 }

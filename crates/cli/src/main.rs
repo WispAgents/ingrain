@@ -6,6 +6,7 @@ mod cmd;
 mod hitlog;
 mod hooks;
 mod repo;
+mod session;
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;

@@ -3,7 +3,7 @@
 pub mod llm;
 pub mod template;
 
-use crate::backtest::{self, Score};
+use crate::backtest::Score;
 use crate::cluster::Cluster;
 use anyhow::{Context, Result};
 use ingrain_core::Correction;
@@ -182,9 +182,6 @@ fn clean(reply: &str, id: &str, lang: &str) -> Result<String> {
     }
     Ok(serde_yaml::to_string(&doc)?)
 }
-
-/// Re-export so callers can score candidates the same way synthesis does.
-pub use backtest::score;
 
 #[cfg(test)]
 mod tests {

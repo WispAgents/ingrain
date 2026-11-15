@@ -22,7 +22,8 @@ pub struct ClaudeCli {
 
 impl Llm for ClaudeCli {
     fn complete(&self, prompt: &str) -> Result<String> {
-        let dir = std::env::temp_dir();
+        // A fresh empty directory: no project CLAUDE.md, settings or hooks get loaded.
+        let dir = tempfile::tempdir().context("creating a temp dir for claude")?;
         let mut child = Command::new("claude")
             .args([
                 "-p",
@@ -34,7 +35,7 @@ impl Llm for ClaudeCli {
                 "--model",
             ])
             .arg(&self.model)
-            .current_dir(dir)
+            .current_dir(dir.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

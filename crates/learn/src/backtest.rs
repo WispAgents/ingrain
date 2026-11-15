@@ -2,7 +2,7 @@
 
 use ingrain_core::{AgentHunk, Backtest, Correction, LineRange, Snippet};
 use ingrain_engine::{CompiledRule, Parsed, lang};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Backtest result plus the numbers derived from it.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -46,17 +46,74 @@ pub fn flags(rule: &CompiledRule, path: &str, snippet: &Snippet) -> bool {
         .any(|h| LineRange::new(h.start_line, h.end_line).overlaps(&snippet.changed))
 }
 
+/// Hits of one rule on one agent hunk, judged against later human corrections.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Judged {
+    /// (line in the snippet, was it a true positive)
+    pub hits: Vec<(u32, bool)>,
+}
+
+impl Judged {
+    pub fn true_hits(&self) -> u32 {
+        self.hits.iter().filter(|(_, t)| *t).count() as u32
+    }
+    pub fn false_hits(&self) -> u32 {
+        self.hits.iter().filter(|(_, t)| !*t).count() as u32
+    }
+}
+
+/// Judge every hit of `rule` on the added lines of `hunk`, one per line.
+///
+/// A hit is a true positive only if it lands on lines a human later corrected *and*
+/// the rule also flags that correction's agent code, i.e. the human fixed the thing the
+/// rule is about, not something else on the same line. `known` selects which
+/// corrections count (by time), so training never sees the future.
+pub fn judge(
+    rule: &CompiledRule,
+    parsed: &Parsed,
+    hunk: &AgentHunk,
+    corrections: &HashMap<&str, &Correction>,
+    known: &dyn Fn(i64) -> bool,
+    relevant: &mut HashMap<String, bool>,
+) -> Judged {
+    let mut seen = HashSet::new();
+    let mut out = Judged::default();
+    for hit in rule.scan(parsed) {
+        let range = LineRange::new(hit.start_line, hit.end_line);
+        if !range.overlaps(&hunk.snippet.changed) || !seen.insert(hit.start_line) {
+            continue;
+        }
+        let is_true = hunk
+            .corrected
+            .iter()
+            .filter(|c| known(c.time) && c.lines.overlaps(&range))
+            .any(|c| {
+                *relevant.entry(c.correction.clone()).or_insert_with(|| {
+                    corrections
+                        .get(c.correction.as_str())
+                        .is_some_and(|corr| flags(rule, &corr.path, &corr.before))
+                })
+            });
+        out.hits.push((hit.start_line, is_true));
+    }
+    out
+}
+
 /// Score `rule` on a cluster's corrections and on the agent-hunk population.
 ///
 /// `prefilter` is a token the matched code must contain; hunks without it are
-/// skipped without parsing. Only hunks written in `[since, known_before)` count:
+/// skipped without parsing. Only pass it for rules that can't match without the
+/// token (template rules). Only hunks written in `[since, known_before)` count:
 /// code from before humans first made this correction was fine at the time (think
 /// of a renamed API), and `known_before` keeps a time-split evaluation from seeing
-/// the future.
+/// the future. `all` maps correction ids to corrections, to check that a hit on
+/// corrected lines is about what the human fixed.
+#[allow(clippy::too_many_arguments)]
 pub fn score(
     rule: &CompiledRule,
     corrections: &[&Correction],
     hunks: &[AgentHunk],
+    all: &HashMap<&str, &Correction>,
     prefilter: Option<&str>,
     since: i64,
     known_before: i64,
@@ -76,6 +133,8 @@ pub fn score(
         }
     }
 
+    let known = |t: i64| t < known_before;
+    let mut relevant = HashMap::new();
     for h in hunks
         .iter()
         .filter(|h| h.time >= since && h.time < known_before)
@@ -88,22 +147,22 @@ pub fn score(
         };
         s.backtest.kept += 1;
         let parsed = Parsed::new(language, &h.snippet.text);
-        let corrected: Vec<&LineRange> = h.corrected_before(known_before).collect();
-        let mut hit_lines = HashSet::new();
-        for hit in rule.scan(&parsed) {
-            let range = LineRange::new(hit.start_line, hit.end_line);
-            if !range.overlaps(&h.snippet.changed) || !hit_lines.insert(hit.start_line) {
-                continue;
-            }
-            if corrected.iter().any(|c| c.overlaps(&range)) {
-                s.true_hits += 1;
-            } else {
-                s.false_hits += 1;
-                s.backtest.kept_hits += 1;
-            }
-        }
+        let judged = judge(rule, &parsed, h, all, &known, &mut relevant);
+        s.true_hits += judged.true_hits();
+        s.false_hits += judged.false_hits();
+        s.backtest.kept_hits += judged.false_hits();
     }
     s
+}
+
+/// Index corrections by id.
+pub fn by_id<'a>(
+    corrections: impl IntoIterator<Item = &'a Correction>,
+) -> HashMap<&'a str, &'a Correction> {
+    corrections
+        .into_iter()
+        .map(|c| (c.id.as_str(), c))
+        .collect()
 }
 
 #[cfg(test)]
@@ -130,7 +189,7 @@ mod tests {
                 .map(|lines| CorrectedLines {
                     lines,
                     time: 5,
-                    correction: "c".into(),
+                    correction: "1".into(),
                 })
                 .into_iter()
                 .collect(),
@@ -152,7 +211,8 @@ mod tests {
             hunk("await fetch(v);", None, 1),
             hunk("nothing here", None, 1),
         ];
-        let s = score(&rule, &[&c], &hunks, Some("fetch"), 0, i64::MAX);
+        let all = by_id([&c]);
+        let s = score(&rule, &[&c], &hunks, &all, Some("fetch"), 0, i64::MAX);
         assert_eq!(s.backtest.before_hits, 1);
         assert_eq!(s.backtest.after_hits, 0);
         assert_eq!(s.true_hits, 1);
@@ -165,14 +225,37 @@ mod tests {
     }
 
     #[test]
+    fn hit_on_lines_fixed_for_another_reason_is_false() {
+        let rule = CompiledRule::compile(RULE).unwrap();
+        // The human renamed a variable on the fetch line; the fetch stayed.
+        let c = correction("1", "TypeScript", "const a = 1;", "const b = 1;", "f");
+        let all = by_id([&c]);
+        let hunks = vec![hunk(
+            "const a = await fetch(u);",
+            Some(LineRange::new(1, 1)),
+            1,
+        )];
+        let s = score(&rule, &[], &hunks, &all, None, 0, i64::MAX);
+        assert_eq!((s.true_hits, s.false_hits), (0, 1));
+    }
+
+    #[test]
     fn hides_the_future() {
         let rule = CompiledRule::compile(RULE).unwrap();
         let hunks = vec![hunk("await fetch(u);", Some(LineRange::new(1, 1)), 1)];
         // The correction happened at t=5; at t=3 the line looks kept.
-        let s = score(&rule, &[], &hunks, None, 0, 3);
+        let c = correction(
+            "1",
+            "TypeScript",
+            "await fetch(u);",
+            "await api.get(u);",
+            "f",
+        );
+        let all = by_id([&c]);
+        let s = score(&rule, &[], &hunks, &all, None, 0, 3);
         assert_eq!((s.true_hits, s.false_hits), (0, 1));
         // Code written before the window doesn't count at all.
-        let s = score(&rule, &[], &hunks, None, 2, i64::MAX);
+        let s = score(&rule, &[], &hunks, &all, None, 2, i64::MAX);
         assert_eq!((s.true_hits, s.false_hits), (0, 0));
     }
 }

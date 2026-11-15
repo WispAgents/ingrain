@@ -2,6 +2,7 @@
 
 use crate::repo::Repo;
 use anyhow::Result;
+use ingrain_core::git::Content;
 use ingrain_core::{DiffBase, Example, LineRange, Mode, RuleFile};
 use ingrain_engine::{CompiledRule, Parsed, lang};
 
@@ -43,14 +44,17 @@ pub fn targets(repo: &Repo, base: &DiffBase, only: Option<&[String]>) -> Result<
             .collect::<Result<_>>()?,
         None => repo.git.added_lines(base)?,
     };
+    let content_side = base.content();
     let mut out = Vec::new();
     for (path, added) in files {
-        if added.is_empty() || lang::detect(&path).is_none() {
+        if added.is_empty() || lang::detect(&path).is_none() || repo.is_ignored(&path) {
             continue;
         }
-        let content = match base {
-            DiffBase::Staged => repo.git.show("", &path),
-            _ => std::fs::read_to_string(repo.git.root().join(&path)).ok(),
+        // Read the side of the diff the line numbers belong to.
+        let content = match &content_side {
+            Content::WorkingTree => std::fs::read_to_string(repo.git.root().join(&path)).ok(),
+            Content::Index => repo.git.show_index(&path),
+            Content::Revision(rev) => repo.git.show(rev, &path),
         };
         if let Some(content) = content {
             out.push(Target {
@@ -113,35 +117,37 @@ pub fn find(rules: &[(RuleFile, CompiledRule)], targets: &[Target]) -> Vec<Findi
 /// Look for `ingrain-ignore <rule>: <reason>` on the hit line or the line above.
 fn ignore_comment(lines: &[&str], line: u32, rule: &str) -> (Option<String>, bool) {
     let idx = line as usize - 1;
-    let candidates = [idx.checked_sub(1), Some(idx)];
-    for i in candidates.into_iter().flatten() {
+    let mut missing_reason = false;
+    for i in [idx.checked_sub(1), Some(idx)].into_iter().flatten() {
         let Some(text) = lines.get(i) else { continue };
-        let Some(pos) = text.find("ingrain-ignore") else {
-            continue;
-        };
-        let rest = text[pos + "ingrain-ignore".len()..].trim_start();
-        let Some(after_id) = rest.strip_prefix(rule) else {
-            continue;
-        };
-        if after_id.starts_with(|c: char| c.is_alphanumeric() || c == '-') {
-            continue; // a longer rule id
+        // A line may carry several ignores: `ingrain-ignore a: x; ingrain-ignore b: y`.
+        for (pos, _) in text.match_indices("ingrain-ignore") {
+            let rest = text[pos + "ingrain-ignore".len()..].trim_start();
+            let Some(after_id) = rest.strip_prefix(rule) else {
+                continue;
+            };
+            if after_id.starts_with(|c: char| c.is_alphanumeric() || c == '-') {
+                continue; // a longer rule id
+            }
+            let reason = after_id
+                .trim_start()
+                .strip_prefix(':')
+                .map(|r| {
+                    let r = r.split("ingrain-ignore").next().unwrap_or("");
+                    r.trim()
+                        .trim_end_matches(';')
+                        .trim_end_matches("*/")
+                        .trim_end_matches("-->")
+                        .trim()
+                })
+                .filter(|r| !r.is_empty());
+            match reason {
+                Some(r) => return (Some(r.to_owned()), false),
+                None => missing_reason = true,
+            }
         }
-        let reason = after_id
-            .trim_start()
-            .strip_prefix(':')
-            .map(|r| {
-                r.trim()
-                    .trim_end_matches("*/")
-                    .trim_end_matches("-->")
-                    .trim()
-            })
-            .filter(|r| !r.is_empty());
-        return match reason {
-            Some(r) => (Some(r.to_owned()), false),
-            None => (None, true),
-        };
     }
-    (None, false)
+    (None, missing_reason)
 }
 
 /// Text sent to the agent for the findings it must act on.
@@ -191,6 +197,8 @@ mod tests {
             "await fetch(u);",
             "await fetch(v); // ingrain-ignore avoid-fetch-call",
             "await fetch(w); // ingrain-ignore avoid-fetch-call-2: other rule",
+            "x",
+            "f(); // ingrain-ignore other: a; ingrain-ignore avoid-fetch-call: b",
         ];
         assert_eq!(
             ignore_comment(&lines, 2, "avoid-fetch-call"),
@@ -198,6 +206,14 @@ mod tests {
         );
         assert_eq!(ignore_comment(&lines, 3, "avoid-fetch-call"), (None, true));
         assert_eq!(ignore_comment(&lines, 4, "avoid-fetch-call"), (None, true));
+        assert_eq!(
+            ignore_comment(&lines, 6, "avoid-fetch-call"),
+            (Some("b".into()), false)
+        );
+        assert_eq!(
+            ignore_comment(&lines, 6, "other"),
+            (Some("a".into()), false)
+        );
     }
 
     fn rule(mode: Mode) -> (RuleFile, CompiledRule) {

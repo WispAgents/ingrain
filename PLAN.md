@@ -77,9 +77,9 @@ Learn only from data before T; freeze rules; score after T:
 - [x] 2. engine: ast-grep wrapper, rule compile + scan, salient tokens, latency test
 - [x] 3. learn/capture: git fix-up miner (+ PR refs), GitHub review suggestions, Claude Code transcripts
 - [x] 4. learn/cluster + synth (template, LLM) + backtest
-- [ ] 5. cli: init, mine, propose, review (interactive + accept/reject/edit), check (hook post-edit/stop, staged, diff, github format), stats/promote
-- [ ] 6. Hook install for Claude Code, git pre-commit, GitHub Action
-- [ ] 7. Tests: unit + fixture repo integration tests (scripted agent commit → human fix-up)
+- [x] 5. cli: init, mine, propose, review (interactive + accept/reject/edit), check (hook post-edit/stop, staged, diff, github format), stats/promote
+- [x] 6. Hook install for Claude Code, git pre-commit, GitHub Action
+- [x] 7. Tests: unit + fixture repo integration tests (scripted agent commit → human fix-up)
 - [ ] 8. eval on 10–20 public repos; write `docs/validation.md` with real numbers
 - [ ] 9. Independent code review by a subagent; fix findings
 - [ ] 10. README, push to WispAgents/ingrain
@@ -98,3 +98,11 @@ electric (Claude, TS), anthropics/claude-agent-sdk-python (Claude, Py), simonw/d
 - 2026-11-15: core/engine/learn crates built, 36 unit tests green. LLM backend default is the `claude` CLI (no API key in env).
 - Precision population = agent hunks; TP = hit on lines a human later corrected, FP = hit on kept agent lines.
 - Cluster support counts distinct fix events (commit / review comment / session), not hunks.
+- 2026-11-15: First real runs (datasette, claude-agent-sdk-python, PyAirbyte): git "corrections" are mostly evolution, not mistakes.
+  Added: skip formatter commits/cosmetic hunks, `propose --explain`, precision window starting when the rule becomes learnable
+  (3rd distinct fix), so pre-rename code isn't counted as a false alarm.
+- Stage 1 hand-label (180 random corrections, 3 repos, independent subagent): evolution 89, bugfix 44, pattern 19 (10.6%),
+  taste 15, structural 13. Bar was >=20% -> MISSED. Of the 19, ~10 are already caught by stock linters (ruff/mypy);
+  ~9 (5%) are repo-specific (renamed API ClaudeCodeOptions, MCP Field defaults, anyio marker, model ids).
+- Hook latency was ~270 ms under load: 5 git spawns. Cut to 2 (one rev-parse, diff first, ls-files only for new files).
+- Big repos (langfuse: 41k commits with PR refs) are slow to mine; validate.sh now caps at the newest 6000 commits and resumes.

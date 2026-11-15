@@ -10,6 +10,7 @@ use std::process::{Command, Stdio};
 #[derive(Debug, Clone)]
 pub struct Git {
     root: PathBuf,
+    git_dir: PathBuf,
 }
 
 /// What added lines are compared against.
@@ -23,14 +24,47 @@ pub enum DiffBase {
     Range(String),
 }
 
+/// Where the checked version of a file lives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Content {
+    WorkingTree,
+    Index,
+    Revision(String),
+}
+
+impl DiffBase {
+    /// The side of the diff whose line numbers `added_lines` reports.
+    pub fn content(&self) -> Content {
+        match self {
+            DiffBase::Head => Content::WorkingTree,
+            DiffBase::Staged => Content::Index,
+            DiffBase::Range(range) => {
+                let right = range
+                    .split_once("...")
+                    .or_else(|| range.split_once(".."))
+                    .map(|(_, r)| r);
+                match right {
+                    Some("") => Content::Revision("HEAD".into()),
+                    Some(r) => Content::Revision(r.into()),
+                    // `git diff <rev>` compares a revision with the working tree.
+                    None => Content::WorkingTree,
+                }
+            }
+        }
+    }
+}
+
 impl Git {
     /// Open the repository containing `dir`.
     pub fn open(dir: &Path) -> Result<Self> {
-        let out = run_in(dir, &["rev-parse", "--show-toplevel"])
+        // One spawn for both paths: hooks run on every agent edit.
+        let out = run_in(dir, &["rev-parse", "--show-toplevel", "--absolute-git-dir"])
             .with_context(|| format!("{} is not inside a git repository", dir.display()))?;
-        Ok(Self {
-            root: PathBuf::from(normalize_path(out.trim())),
-        })
+        let mut lines = out.lines().map(|l| PathBuf::from(normalize_path(l.trim())));
+        let (Some(root), Some(git_dir)) = (lines.next(), lines.next()) else {
+            bail!("unexpected `git rev-parse` output in {}", dir.display());
+        };
+        Ok(Self { root, git_dir })
     }
 
     pub fn root(&self) -> &Path {
@@ -48,9 +82,8 @@ impl Git {
     }
 
     /// The `.git` directory (resolves worktrees).
-    pub fn git_dir(&self) -> Result<PathBuf> {
-        let out = self.run(&["rev-parse", "--absolute-git-dir"])?;
-        Ok(PathBuf::from(normalize_path(out.trim())))
+    pub fn git_dir(&self) -> &Path {
+        &self.git_dir
     }
 
     pub fn has_head(&self) -> bool {
@@ -63,33 +96,48 @@ impl Git {
         self.try_run(&["show", &format!("{rev}:{path}")])
     }
 
+    /// File content in the index (staged version).
+    pub fn show_index(&self, path: &str) -> Option<String> {
+        self.try_run(&["show", &format!(":{path}")])
+    }
+
     /// Diff for one file or the whole tree, parsed.
     pub fn diff(&self, base: &DiffBase, path: Option<&str>) -> Result<Vec<FileDiff>> {
-        let mut args: Vec<String> = vec![
-            "diff".into(),
-            "--no-color".into(),
-            "--no-ext-diff".into(),
-            "-U0".into(),
-            "--no-renames".into(),
-        ];
-        match base {
-            DiffBase::Head => {
-                if self.has_head() {
-                    args.push("HEAD".into());
-                } else {
-                    // No commits yet: compare the index against the empty tree.
-                    args.push("--cached".into());
-                }
+        let revs: Vec<&str> = match base {
+            DiffBase::Head => vec!["HEAD"],
+            DiffBase::Staged => vec!["--cached"],
+            DiffBase::Range(range) => vec!["--end-of-options", range.as_str()],
+        };
+        match self.diff_revs(&revs, path) {
+            // No commits yet: compare the index against the empty tree instead.
+            Err(_) if *base == DiffBase::Head && !self.has_head() => {
+                self.diff_revs(&["--cached"], path)
             }
-            DiffBase::Staged => args.push("--cached".into()),
-            DiffBase::Range(range) => args.push(range.clone()),
+            other => other,
         }
-        args.push("--".into());
+    }
+
+    /// `git diff -U0` between revisions, with output that doesn't depend on the
+    /// user's config: fixed `a/` `b/` prefixes, unquoted paths, renames detected
+    /// (so a moved file doesn't count as fully added), no external diff tools.
+    pub fn diff_revs(&self, revs: &[&str], path: Option<&str>) -> Result<Vec<FileDiff>> {
+        let mut args = vec![
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "-U0",
+            "-M",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+        ];
+        args.extend_from_slice(revs);
+        args.push("--");
         if let Some(p) = path {
-            args.push(p.into());
+            args.push(p);
         }
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        Ok(diff::parse(&self.run(&refs)?))
+        Ok(diff::parse(&self.run(&args)?))
     }
 
     /// Untracked files that are not ignored (paths relative to the root).
@@ -128,21 +176,23 @@ impl Git {
 
     /// Added line ranges for a single file against `base`.
     pub fn added_lines_for(&self, base: &DiffBase, path: &str) -> Result<Vec<LineRange>> {
-        if *base == DiffBase::Head {
-            let tracked = self
-                .try_run(&["ls-files", "--error-unmatch", "--", path])
-                .is_some();
-            if !tracked {
-                return Ok(vec![LineRange::new(1, u32::MAX)]);
-            }
-        }
-        Ok(self
+        let ranges: Vec<LineRange> = self
             .diff(base, Some(path))?
             .into_iter()
             .flat_map(|f| f.hunks)
             .map(|h| h.new_range())
             .filter(|r| !r.is_empty())
-            .collect())
+            .collect();
+        // An empty diff is either an unchanged file or a new, untracked one.
+        if ranges.is_empty()
+            && *base == DiffBase::Head
+            && self
+                .try_run(&["ls-files", "--error-unmatch", "--", path])
+                .is_none()
+        {
+            return Ok(vec![LineRange::new(1, u32::MAX)]);
+        }
+        Ok(ranges)
     }
 
     /// Path relative to the repository root, with `/` separators.
@@ -222,6 +272,50 @@ mod tests {
         assert_eq!(untracked, vec![LineRange::new(1, u32::MAX)]);
         let all = repo.added_lines(&DiffBase::Head).unwrap();
         assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn diff_ignores_user_prefix_config_and_quotes_paths() {
+        let dir = init_repo();
+        git(dir.path(), &["config", "diff.mnemonicPrefix", "true"]);
+        std::fs::write(dir.path().join("é.ts"), "a\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-qm", "init"]);
+        std::fs::write(dir.path().join("é.ts"), "a\nb\n").unwrap();
+        let repo = Git::open(dir.path()).unwrap();
+        let added = repo.added_lines(&DiffBase::Head).unwrap();
+        assert_eq!(
+            added,
+            vec![("é.ts".to_string(), vec![LineRange::new(2, 2)])]
+        );
+    }
+
+    #[test]
+    fn renamed_file_is_not_fully_added() {
+        let dir = init_repo();
+        std::fs::write(dir.path().join("a.ts"), "one\ntwo\nthree\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-qm", "init"]);
+        git(dir.path(), &["mv", "a.ts", "b.ts"]);
+        let repo = Git::open(dir.path()).unwrap();
+        assert!(repo.added_lines(&DiffBase::Staged).unwrap().is_empty());
+    }
+
+    #[test]
+    fn range_content_side() {
+        assert_eq!(
+            DiffBase::Range("main...feat".into()).content(),
+            Content::Revision("feat".into())
+        );
+        assert_eq!(
+            DiffBase::Range("main..".into()).content(),
+            Content::Revision("HEAD".into())
+        );
+        assert_eq!(
+            DiffBase::Range("main".into()).content(),
+            Content::WorkingTree
+        );
+        assert_eq!(DiffBase::Staged.content(), Content::Index);
     }
 
     #[test]

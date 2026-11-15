@@ -4,8 +4,10 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::path::Path;
 
-const POST_EDIT: &str = "ingrain check --hook post-edit";
-const STOP: &str = "ingrain check --hook stop";
+// `.claude/settings.json` is shared with the team: teammates without ingrain get a no-op.
+const POST_EDIT: &str =
+    "command -v ingrain >/dev/null 2>&1 && ingrain check --hook post-edit || true";
+const STOP: &str = "command -v ingrain >/dev/null 2>&1 && ingrain check --hook stop || true";
 const PRE_COMMIT_MARKER: &str = "# ingrain";
 
 /// What an install step did.

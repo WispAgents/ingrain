@@ -33,7 +33,7 @@ impl Layout {
     pub fn for_repo(git: &Git) -> Result<Self> {
         Ok(Self::new(
             git.root().to_path_buf(),
-            git.git_dir()?.join("ingrain"),
+            git.git_dir().join("ingrain"),
         ))
     }
 
@@ -52,8 +52,18 @@ impl Layout {
     pub fn rejected_file(&self) -> PathBuf {
         self.corrections_dir().join("rejected.yml")
     }
-    pub fn rule_path(&self, dir: &Path, id: &str) -> PathBuf {
-        dir.join(format!("{id}.yml"))
+    /// `<dir>/<id>.yml`. Ids are slugs; anything else (`../x`) is rejected so a rule
+    /// id can't point outside `.corrections/`.
+    pub fn rule_path(&self, dir: &Path, id: &str) -> Result<PathBuf> {
+        let valid = !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+            && !id.starts_with('.');
+        if !valid {
+            anyhow::bail!("invalid rule id `{id}` (use letters, digits, `-`, `_`)");
+        }
+        Ok(dir.join(format!("{id}.yml")))
     }
 
     pub fn corrections_file(&self) -> PathBuf {
@@ -65,7 +75,7 @@ impl Layout {
     pub fn hits_file(&self) -> PathBuf {
         self.data.join("hits.jsonl")
     }
-    pub fn stop_state_file(&self) -> PathBuf {
-        self.data.join("stop_attempts.json")
+    pub fn sessions_dir(&self) -> PathBuf {
+        self.data.join("sessions")
     }
 }

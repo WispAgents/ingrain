@@ -61,12 +61,12 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     let mined = capture::git::mine(&repo.git, &opts)?;
     let s = &mined.stats;
     println!(
-        "git: {} commits ({} agent, {} human, {} bot), {} human commits skipped as large, {} hunks blamed",
+        "git: {} commits ({} agent, {} human, {} bot), {} human commits skipped (refactors, formatter runs), {} hunks blamed",
         s.commits,
         s.agent_commits,
         s.human_commits,
         s.bot_commits,
-        s.human_commits_skipped_large,
+        s.human_commits_skipped,
         s.hunks_blamed
     );
     println!(

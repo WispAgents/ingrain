@@ -6,7 +6,7 @@
 //! A correction can sit in several clusters; backtesting decides which ones become rules.
 
 use ingrain_core::Correction;
-use ingrain_engine::{Lang, Token, lang, tokens};
+use ingrain_engine::{Token, lang, tokens};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A removed token, scoped to a language family.
@@ -193,11 +193,6 @@ pub fn pattern_stats(corrections: &[Correction], min_support: usize) -> PatternS
         with_anchor,
         repeated: repeated.len(),
     }
-}
-
-/// Parse a language name stored on a correction.
-pub fn language(c: &Correction) -> Option<Lang> {
-    lang::parse(&c.lang)
 }
 
 #[cfg(test)]

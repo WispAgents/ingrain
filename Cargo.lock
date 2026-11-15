@@ -746,6 +746,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "globset",
  "ingrain-core",
  "ingrain-engine",
  "ingrain-learn",

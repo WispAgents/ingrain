@@ -44,7 +44,7 @@ fn accept_one(repo: &Repo, id: &str) -> Result<std::path::PathBuf> {
     CompiledRule::compile(&rule.to_yaml())
         .with_context(|| format!("{id} doesn't compile; edit it first"))?;
     let pending_path = rule.path.clone();
-    let dest = repo.layout.rule_path(&repo.layout.rules_dir(), id);
+    let dest = repo.layout.rule_path(&repo.layout.rules_dir(), id)?;
     if dest.exists() {
         bail!("an accepted rule `{id}` already exists");
     }
@@ -89,6 +89,8 @@ pub fn interactive(dir: &Path) -> Outcome {
     let mut input = stdin.lock();
     for (i, rule) in pending.iter().enumerate() {
         println!("\n[{}/{}] {}", i + 1, pending.len(), describe(rule));
+        // The id can change when the rule is edited; the file follows it.
+        let mut id = rule.id.clone();
         loop {
             print!("[a]ccept  [e]dit  [r]eject  [s]kip  [q]uit > ");
             std::io::stdout().flush()?;
@@ -96,25 +98,28 @@ pub fn interactive(dir: &Path) -> Outcome {
                 return Ok(ExitCode::SUCCESS);
             };
             match answer.as_str() {
-                "a" => {
-                    accept_one(&repo, &rule.id)?;
-                    println!("accepted (shadow mode)");
-                    break;
-                }
-                "e" => {
-                    edit(&rule.path)?;
-                    match RuleFile::load(&rule.path)
-                        .and_then(|r| CompiledRule::compile(&r.to_yaml()))
-                    {
-                        Ok(_) => println!("saved; the rule still compiles"),
-                        Err(e) => println!("the edited rule doesn't compile: {e:#}"),
+                "a" => match accept_one(&repo, &id) {
+                    Ok(_) => {
+                        println!("accepted (shadow mode)");
+                        break;
                     }
-                }
+                    Err(e) => println!("{e:#}"),
+                },
+                "e" => match edit_pending(&repo, &id) {
+                    Ok(new_id) => {
+                        if new_id != id {
+                            println!("renamed to {new_id}");
+                        }
+                        println!("saved; the rule compiles");
+                        id = new_id;
+                    }
+                    Err(e) => println!("{e:#}"),
+                },
                 "r" => {
                     print!("reason > ");
                     std::io::stdout().flush()?;
                     let reason = read_line(&mut input)?.unwrap_or_default();
-                    match reject_one(&repo, &rule.id, &reason) {
+                    match reject_one(&repo, &id, &reason) {
                         Ok(()) => {
                             println!("rejected");
                             break;
@@ -130,6 +135,26 @@ pub fn interactive(dir: &Path) -> Outcome {
     }
     println!("\ncommit .corrections/ to share accepted rules");
     Ok(ExitCode::SUCCESS)
+}
+
+/// Open the pending rule in an editor, then check it compiles. If the edit changed
+/// the `id:`, move the file so its name keeps matching. Returns the (possibly new) id.
+fn edit_pending(repo: &Repo, id: &str) -> Result<String> {
+    let path = repo.layout.rule_path(&repo.layout.pending_dir(), id)?;
+    edit(&path)?;
+    let mut rule = RuleFile::load(&path)?;
+    CompiledRule::compile(&rule.to_yaml()).context("the edited rule doesn't compile")?;
+    if rule.id != id {
+        let dest = repo
+            .layout
+            .rule_path(&repo.layout.pending_dir(), &rule.id)?;
+        if dest.exists() {
+            bail!("a pending rule `{}` already exists", rule.id);
+        }
+        rule.save(&dest)?;
+        std::fs::remove_file(&path)?;
+    }
+    Ok(rule.id)
 }
 
 fn read_line(input: &mut impl BufRead) -> Result<Option<String>> {

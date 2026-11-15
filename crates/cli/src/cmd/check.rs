@@ -2,10 +2,10 @@ use super::Outcome;
 use crate::check::{self, Finding};
 use crate::hitlog::{self, Entry, Event};
 use crate::repo::Repo;
+use crate::session::Session;
 use anyhow::{Context, Result};
 use ingrain_core::{DiffBase, Mode};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
@@ -130,12 +130,18 @@ fn run_hook(dir: &Path, hook: Hook) -> Result<()> {
     if rules.is_empty() {
         return Ok(());
     }
+    let session_id = payload["session_id"].as_str().unwrap_or("default");
     match hook {
         Hook::PostEdit => {
             let file = payload["tool_input"]["file_path"]
                 .as_str()
                 .context("hook input has no tool_input.file_path")?;
             let rel = repo.git.relative(Path::new(file));
+            let sessions = repo.layout.sessions_dir();
+            let mut state = Session::load(&sessions, session_id)?;
+            if state.edited.insert(rel.clone()) {
+                state.save(&sessions, session_id)?;
+            }
             let targets = check::targets(&repo, &DiffBase::Head, Some(&[rel]))?;
             let findings = check::find(&rules, &targets);
             log(&repo, &findings, "hook")?;
@@ -157,26 +163,34 @@ fn run_hook(dir: &Path, hook: Hook) -> Result<()> {
             }
         }
         Hook::Stop => {
-            let targets = check::targets(&repo, &DiffBase::Head, None)?;
+            let sessions = repo.layout.sessions_dir();
+            let mut state = Session::load(&sessions, session_id)?;
+            // Only the files this session's agent edited; the human's uncommitted work is theirs.
+            let edited: Vec<String> = state.edited.iter().cloned().collect();
+            let targets = if edited.is_empty() {
+                Vec::new()
+            } else {
+                check::targets(&repo, &DiffBase::Head, Some(&edited))?
+            };
             let findings = check::find(&rules, &targets);
             let block = active(&findings, Mode::Block);
-            let session = payload["session_id"]
-                .as_str()
-                .unwrap_or("default")
-                .to_owned();
             if block.is_empty() {
-                set_attempts(&repo, &session, 0)?;
+                if state.stop_attempts > 0 {
+                    state.stop_attempts = 0;
+                    state.save(&sessions, session_id)?;
+                }
                 return Ok(());
             }
-            let attempts = attempts(&repo, &session)?;
-            if attempts < repo.config.stop_max_attempts {
-                set_attempts(&repo, &session, attempts + 1)?;
+            if state.stop_attempts < repo.config.stop_max_attempts {
+                state.stop_attempts += 1;
+                state.save(&sessions, session_id)?;
                 print_json(
                     &json!({ "decision": "block", "reason": check::agent_message(&block, true) }),
                 );
             } else {
                 // Let the turn end; record that it ended with violations for the human to see.
-                set_attempts(&repo, &session, 0)?;
+                state.stop_attempts = 0;
+                state.save(&sessions, session_id)?;
                 let unresolved: Vec<Finding> = block.into_iter().cloned().collect();
                 log_event(&repo, &unresolved, "stop", Event::Unresolved)?;
                 eprintln!(
@@ -218,36 +232,10 @@ fn log_event(repo: &Repo, findings: &[Finding], context: &str, event: Event) -> 
             event: event.clone(),
             context: context.to_owned(),
             reason: f.override_reason.clone(),
+            matched: f.matched.clone(),
         })
         .collect();
     hitlog::append(&repo.layout.hits_file(), &entries)
-}
-
-fn attempts(repo: &Repo, session: &str) -> Result<u32> {
-    Ok(read_attempts(repo)?.get(session).copied().unwrap_or(0))
-}
-
-fn set_attempts(repo: &Repo, session: &str, n: u32) -> Result<()> {
-    let mut all = read_attempts(repo)?;
-    if n == 0 {
-        if all.remove(session).is_none() {
-            return Ok(());
-        }
-    } else {
-        all.insert(session.to_owned(), n);
-    }
-    let path = repo.layout.stop_state_file();
-    std::fs::create_dir_all(path.parent().expect("has parent"))?;
-    std::fs::write(path, serde_json::to_string(&all)?)?;
-    Ok(())
-}
-
-fn read_attempts(repo: &Repo) -> Result<HashMap<String, u32>> {
-    let path = repo.layout.stop_state_file();
-    if !path.exists() {
-        return Ok(HashMap::new());
-    }
-    Ok(serde_json::from_str(&std::fs::read_to_string(path)?).unwrap_or_default())
 }
 
 fn print_json(v: &Value) {

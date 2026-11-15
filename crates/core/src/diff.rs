@@ -98,8 +98,45 @@ fn strip_side(path: &str, prefix: &str) -> Option<String> {
     if path == "/dev/null" {
         return None;
     }
-    let path = path.trim_matches('"');
-    Some(path.strip_prefix(prefix).unwrap_or(path).to_owned())
+    let path = unquote(path);
+    Some(path.strip_prefix(prefix).unwrap_or(&path).to_owned())
+}
+
+/// Undo git's C-style quoting (`"a\tb\303\251"`), which it applies to paths with
+/// special characters even when `core.quotePath` is off.
+fn unquote(path: &str) -> String {
+    let Some(inner) = path.strip_prefix('"').and_then(|p| p.strip_suffix('"')) else {
+        return path.to_owned();
+    };
+    let mut bytes = Vec::with_capacity(inner.len());
+    let mut chars = inner.bytes().peekable();
+    while let Some(b) = chars.next() {
+        if b != b'\\' {
+            bytes.push(b);
+            continue;
+        }
+        match chars.next() {
+            Some(b'n') => bytes.push(b'\n'),
+            Some(b't') => bytes.push(b'\t'),
+            Some(b'r') => bytes.push(b'\r'),
+            Some(d @ b'0'..=b'7') => {
+                let mut value = u32::from(d - b'0');
+                for _ in 0..2 {
+                    match chars.peek() {
+                        Some(&o @ b'0'..=b'7') => {
+                            value = value * 8 + u32::from(o - b'0');
+                            chars.next();
+                        }
+                        _ => break,
+                    }
+                }
+                bytes.push(value as u8);
+            }
+            Some(other) => bytes.push(other),
+            None => bytes.push(b'\\'),
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// Parse `@@ -a,b +c,d @@ ...`.
@@ -149,6 +186,13 @@ new file mode 100644
 @@ -0,0 +1 @@
 +print('hi')
 ";
+
+    #[test]
+    fn unquotes_c_style_paths() {
+        assert_eq!(unquote("\"b/\\303\\251/y.ts\""), "b/é/y.ts");
+        assert_eq!(unquote("\"a/tab\\there\""), "a/tab\there");
+        assert_eq!(unquote("b/plain.ts"), "b/plain.ts");
+    }
 
     #[test]
     fn parses_files_and_hunks() {

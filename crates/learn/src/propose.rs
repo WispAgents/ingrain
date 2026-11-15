@@ -2,7 +2,7 @@
 
 use crate::backtest::{self, Score};
 use crate::cluster::{self, Anchor, Cluster};
-use crate::synth::{self, Candidate, llm::Llm, template};
+use crate::synth::{self, Candidate, Origin, llm::Llm, template};
 use anyhow::Result;
 use ingrain_core::{AgentHunk, Correction, Example, IngrainMeta, Mode, RuleFile, Source};
 use ingrain_engine::CompiledRule;
@@ -111,14 +111,19 @@ pub fn propose(
         ..Default::default()
     };
 
-    let evaluate = |rule: &CompiledRule, cl: &Cluster| -> Score {
+    let all = backtest::by_id(&train);
+    // Template rules always contain the anchor token, so hunks without it can be
+    // skipped; model-written rules can match without it and are scored on every hunk.
+    let evaluate = |rule: &CompiledRule, cl: &Cluster, origin: Origin| -> Score {
         let members: Vec<&Correction> = cl.members.iter().map(|&i| &train[i]).collect();
         let since = learnable_at(&members, opts.min_support);
+        let prefilter = (origin == Origin::Template).then_some(cl.anchor.token.as_str());
         backtest::score(
             rule,
             &members,
             hunks,
-            Some(&cl.anchor.token),
+            &all,
+            prefilter,
             since,
             opts.known_before,
         )
@@ -159,7 +164,7 @@ pub fn propose(
                 let Ok(compiled) = CompiledRule::compile(&cand.yaml) else {
                     continue;
                 };
-                let score = evaluate(&compiled, cl);
+                let score = evaluate(&compiled, cl, Origin::Template);
                 let accepted = accept(&score, cl);
                 explain.candidates.push(CandidateExplain {
                     label: cand.label.clone(),
@@ -207,7 +212,7 @@ pub fn propose(
                     &members,
                     &rule_id(&cl.anchor),
                     opts.llm_attempts,
-                    &|rule| evaluate(rule, cl),
+                    &|rule| evaluate(rule, cl, Origin::Llm),
                     &|s| accept(s, cl),
                 );
                 (i, r)
@@ -297,13 +302,30 @@ fn meta(cand: &Candidate, score: &Score, members: &[&Correction]) -> IngrainMeta
         mode: Mode::Shadow,
         support,
         origin: cand.origin.as_str().into(),
-        evidence: members.iter().take(5).map(|c| evidence(c)).collect(),
+        evidence: distinct_events(members).take(5).map(evidence).collect(),
         backtest: Some(score.backtest.clone()),
-        example: members.first().map(|c| Example {
-            before: first_lines(&c.before.changed_text(), 6),
-            after: first_lines(&c.after.changed_text(), 6),
-        }),
+        example: best_example(members),
     }
+}
+
+/// One correction per fix event (a commit that fixed three hunks is one piece of evidence).
+fn distinct_events<'a>(members: &'a [&'a Correction]) -> impl Iterator<Item = &'a Correction> + 'a {
+    let mut seen = HashSet::new();
+    members
+        .iter()
+        .copied()
+        .filter(move |c| seen.insert(cluster::source_key(c)))
+}
+
+/// The shortest correction that has both sides, so the agent sees a clear before → after.
+fn best_example(members: &[&Correction]) -> Option<Example> {
+    let side = |s: &ingrain_core::Snippet| first_lines(s.changed_text().trim_matches('\n'), 6);
+    members
+        .iter()
+        .map(|c| (side(&c.before), side(&c.after)))
+        .filter(|(b, a)| !b.trim().is_empty() && !a.trim().is_empty())
+        .min_by_key(|(b, a)| b.len() + a.len())
+        .map(|(before, after)| Example { before, after })
 }
 
 fn evidence(c: &Correction) -> String {

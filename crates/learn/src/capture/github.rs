@@ -77,7 +77,8 @@ pub fn corrections(
             if !reviewer_is_human {
                 return None;
             }
-            let (agent_time, author) = commit_author(git, &c.original_commit_id, classifier)?;
+            let (start, end) = commented_lines(c)?;
+            let (agent_time, author) = line_author(git, c, start, end, classifier)?;
             if author != Author::Agent {
                 return None;
             }
@@ -85,6 +86,41 @@ pub fn corrections(
             from_comment(c, agent_time, time)
         })
         .collect()
+}
+
+/// The commented line range, if well-formed.
+fn commented_lines(c: &ReviewComment) -> Option<(u32, u32)> {
+    let end = c.original_line?;
+    let start = c.original_start_line.unwrap_or(end);
+    (start >= 1 && start <= end).then_some((start, end))
+}
+
+/// Who wrote the commented lines: blame them at the commit the comment was made on.
+/// (That commit is the PR head at the time, which may be someone else's commit.)
+fn line_author(
+    git: &Git,
+    c: &ReviewComment,
+    start: u32,
+    end: u32,
+    classifier: &Classifier,
+) -> Option<(i64, Author)> {
+    let range = format!("{start},{end}");
+    let out = git.try_run(&[
+        "blame",
+        "--porcelain",
+        "-L",
+        &range,
+        &c.original_commit_id,
+        "--",
+        &c.path,
+    ])?;
+    let origins = super::git::parse_blame(&out);
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for o in origins.values() {
+        *counts.entry(o.sha.as_str()).or_default() += 1;
+    }
+    let (sha, _) = counts.into_iter().max_by_key(|(sha, n)| (*n, *sha))?;
+    commit_author(git, sha, classifier)
 }
 
 fn commit_author(git: &Git, sha: &str, classifier: &Classifier) -> Option<(i64, Author)> {
@@ -101,8 +137,7 @@ fn commit_author(git: &Git, sha: &str, classifier: &Classifier) -> Option<(i64, 
 pub fn from_comment(c: &ReviewComment, agent_time: i64, time: i64) -> Option<Correction> {
     let suggestion = suggestion(&c.body)?;
     let language = lang::detect(&c.path).filter(|l| lang::is_code(*l))?;
-    let end = c.original_line?;
-    let start = c.original_start_line.unwrap_or(end);
+    let (start, end) = commented_lines(c)?;
     let commented = (end - start + 1) as usize;
 
     // New-side lines of the diff hunk; the comment covers its last `commented` lines.
@@ -110,7 +145,7 @@ pub fn from_comment(c: &ReviewComment, agent_time: i64, time: i64) -> Option<Cor
         .diff_hunk
         .lines()
         .skip(1)
-        .filter(|l| !l.starts_with('-'))
+        .filter(|l| !l.starts_with('-') && !l.starts_with('\\'))
         .map(|l| l.get(1..).unwrap_or(""))
         .collect();
     if new_side.len() < commented {
