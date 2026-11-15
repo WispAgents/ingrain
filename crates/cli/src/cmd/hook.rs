@@ -56,8 +56,15 @@ pub fn run(dir: &Path, event: Event, from_plugin: bool) -> Outcome {
 /// repos that never chose ingrain nor answer twice where the repo's hooks do.
 fn plugin_steps_aside(dir: &Path, payload: &Value) -> bool {
     let dir = payload["cwd"].as_str().map(Path::new).unwrap_or(dir);
-    let Ok(repo) = Repo::open(dir) else {
-        return true;
+    if ingrain_core::Git::open(dir).is_err() {
+        return true; // not a git repo
+    }
+    let repo = match Repo::open(dir) {
+        Ok(repo) => repo,
+        Err(e) => {
+            eprintln!("ingrain hook error (ignored): {e:#}");
+            return true;
+        }
     };
     let set_up = repo.layout.corrections_dir().is_dir() || !repo.ledger.live_lenient().is_empty();
     if !set_up {
