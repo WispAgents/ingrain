@@ -51,7 +51,7 @@ tokens (`if`, `self`, `error`, `str`), not mistakes. The hand labels are the rea
 Bar: median per repo ≥10–15% of post-cutoff corrections prevented, ≥90% precision, <50 ms per file.
 **Missed on both quality bars.**
 
-Method (`ingrain eval`): sort corrections by time and learn only from the oldest 60%. Freeze the
+Method (`ingrain rules eval`): sort corrections by time and learn only from the oldest 60%. Freeze the
 rules. Then on the newest 40%:
 - **prevented:** the rule flags the agent's lines and not the human fix.
 - **precision:** hits on later agent code. True if a human later corrected that line *and* the rule
@@ -123,7 +123,7 @@ Not tested, because public data can't measure them:
 2. Keep the enforcement layer (`ingrain check`, hooks, pre-commit, Action, hand-written or ast-grep
    rules). It's small, fast and tested, and useful with hand-written rules or stock linters.
 3. If the idea continues, run Stage 1 on **your own Claude Code transcripts**
-   (`ingrain mine` reads `~/.claude/projects` locally). It's an hour and the one open signal.
+   (`ingrain rules mine` reads `~/.claude/projects` locally). It's an hour and the one open signal.
 4. The data points at Idea 2 (the decision ledger). Most corrections are about intent ("we don't
    want this feature", "this changed"), which is what a decision record captures and a lint rule
    can't.

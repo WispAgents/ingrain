@@ -56,6 +56,7 @@ fn run(dir: &Path, args: &[&str], stdin: &str) -> Output {
         .env("HOME", dir.join(".home"))
         .env("PATH", path_env(dir))
         .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("CLAUDE_PROJECT_DIR")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -197,7 +198,12 @@ fn records_inject_block_and_supersede() {
     );
 
     // If the bad code lands anyway (written outside the hook), Stop sends the turn back,
-    // but only for files this session edited.
+    // but only for files this session edited (recorded after a successful edit).
+    hook(
+        dir,
+        "post-tool-use",
+        json!({"session_id": "s1", "cwd": dir, "tool_name": "Edit", "tool_input": {"file_path": file}}),
+    );
     std::fs::write(&file, "export const charge = () => fetch('/pay');\n").unwrap();
     let stop = hook(dir, "stop", json!({"session_id": "s1", "cwd": dir})).unwrap();
     assert_eq!(stop["decision"], "block");
@@ -388,10 +394,12 @@ fn review_regressions_symlinks_outside_edits_and_ledger_tampering() {
     // An edit outside the repo doesn't switch off the Stop hook.
     let outside = json!({"session_id": "s2", "cwd": dir, "tool_name": "Write",
         "tool_input": {"file_path": "/tmp/somewhere-else/plan.md", "content": "notes"}});
-    assert!(hook(dir, "pre-tool-use", outside).is_none());
+    assert!(hook(dir, "pre-tool-use", outside.clone()).is_none());
+    assert!(hook(dir, "post-tool-use", outside).is_none());
     let inside = json!({"session_id": "s2", "cwd": dir, "tool_name": "Write",
         "tool_input": {"file_path": dir.join("src/d.ts"), "content": "export const d = 1;\n"}});
-    hook(dir, "pre-tool-use", inside);
+    hook(dir, "pre-tool-use", inside.clone());
+    hook(dir, "post-tool-use", inside);
     std::fs::write(dir.join("src/d.ts"), "import axios from 'axios';\n").unwrap();
     assert_eq!(
         hook(dir, "stop", json!({"session_id": "s2", "cwd": dir})).unwrap()["decision"],
@@ -428,4 +436,107 @@ fn review_regressions_symlinks_outside_edits_and_ledger_tampering() {
         String::from_utf8_lossy(&out.stdout)
             .contains("note: this change edits decisions/D-0001.yml")
     );
+}
+
+#[test]
+fn merge_review_regressions() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"x\"\n\n[dependencies]\nserde = \"1\"\n",
+    )
+    .unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "manifest"]);
+    ok(
+        dir,
+        &["add", "Keep the cache on SQLite.", "--forbid-dep", "redis"],
+    );
+    git(dir, &["commit", "-qm", "decisions"]);
+
+    // Pre-commit checks manifests ast-grep can't parse.
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"x\"\n\n[dependencies]\nserde = \"1\"\nredis = \"0.25\"\n",
+    )
+    .unwrap();
+    git(dir, &["add", "Cargo.toml"]);
+    let out = run(dir, &["check", "--staged"], "");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Cargo.toml"));
+    git(dir, &["checkout", "-q", "HEAD", "--", "Cargo.toml"]);
+
+    // A denied edit doesn't make the file "agent-edited": the person's own later change
+    // to it doesn't send the agent's turn back.
+    let denied = json!({"session_id": "s", "cwd": dir, "tool_name": "Edit",
+        "tool_input": {"file_path": dir.join("Cargo.toml"), "old_string": "serde = \"1\"", "new_string": "serde = \"1\"\nredis = \"0.25\""}});
+    assert_eq!(
+        hook(dir, "pre-tool-use", denied).unwrap()["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"x\"\n\n[dependencies]\nserde = \"1\"\nredis = \"0.25\"\n",
+    )
+    .unwrap();
+    assert!(hook(dir, "stop", json!({"session_id": "s", "cwd": dir})).is_none());
+
+    // v0.1 settings still work (with a deprecation note) until `ingrain init` is re-run.
+    let out = run(
+        dir,
+        &["check", "--hook", "stop"],
+        &json!({"session_id": "t", "cwd": dir}).to_string(),
+    );
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("deprecated"));
+}
+
+/// The plugin's hooks run in every repo: they answer only where ingrain is set up and the repo's
+/// own settings don't already run it (current or v0.1 hook commands).
+#[test]
+fn plugin_hooks_answer_only_in_set_up_repos_without_their_own() {
+    let tmp = repo();
+    let dir = tmp.path();
+    let edit = |path: &str| {
+        json!({ "session_id": "p", "cwd": dir, "tool_name": "Write",
+                "tool_input": { "file_path": dir.join(path), "content": "x: 1\n" } })
+    };
+    let plugin = |event: &str, payload: Value| {
+        let out = run(dir, &["hook", event, "--from-plugin"], &payload.to_string());
+        assert!(out.status.success());
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        (!text.trim().is_empty()).then(|| serde_json::from_str::<Value>(&text).unwrap())
+    };
+
+    // A repo that never ran `ingrain init`, with its own unrelated decisions/ folder.
+    std::fs::create_dir_all(dir.join("decisions")).unwrap();
+    assert_eq!(plugin("pre-tool-use", edit("decisions/0001-db.yml")), None);
+
+    // Set up, no repo hooks: the plugin answers.
+    ok(dir, &["init", "--no-claude", "--no-git-hook"]);
+    let denied = plugin("pre-tool-use", edit("decisions/D-0001.yml")).expect("plugin answers");
+    assert_eq!(denied["hookSpecificOutput"]["permissionDecision"], "deny");
+
+    // The repo's own hooks run ingrain, current or legacy: the plugin steps aside.
+    std::fs::create_dir_all(dir.join(".claude")).unwrap();
+    for command in ["ingrain hook pre-tool-use", "ingrain check --hook stop"] {
+        let settings = json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": command }] }] } });
+        std::fs::write(dir.join(".claude/settings.json"), settings.to_string()).unwrap();
+        assert_eq!(
+            plugin("pre-tool-use", edit("decisions/D-0001.yml")),
+            None,
+            "{command}"
+        );
+    }
+    // A permission rule naming ingrain is not a hook.
+    let settings = json!({ "permissions": { "allow": ["Bash(ingrain hook stop)"] } });
+    std::fs::write(dir.join(".claude/settings.json"), settings.to_string()).unwrap();
+    assert!(plugin("pre-tool-use", edit("decisions/D-0001.yml")).is_some());
 }

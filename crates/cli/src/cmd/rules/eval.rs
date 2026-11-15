@@ -1,4 +1,4 @@
-use super::Outcome;
+use crate::cmd::Outcome;
 use crate::repo::Repo;
 use ingrain_core::{AgentHunk, Correction, store};
 use ingrain_learn::eval::{self, EvalOptions};

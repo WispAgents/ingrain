@@ -12,6 +12,10 @@ pub struct Args {
     /// Don't install the git pre-commit hook.
     #[arg(long)]
     no_git_hook: bool,
+    /// Also add an ingrain section to AGENTS.md, for agents that read it but run no hooks
+    /// (Codex, Cursor, Copilot…).
+    #[arg(long)]
+    agents_md: bool,
 }
 
 pub fn run(dir: &Path, args: Args) -> Outcome {
@@ -46,6 +50,14 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
             hooks::install_claude(repo.git.root())?,
         );
     }
+    if args.agents_md {
+        let path = repo.git.root().join("AGENTS.md");
+        if crate::agents_md::write(&path)? {
+            println!("updated the ingrain section in {}", path.display());
+        } else {
+            println!("AGENTS.md: ingrain section already up to date");
+        }
+    }
     if !args.no_git_hook {
         report(
             "git pre-commit hook",
@@ -55,7 +67,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     println!(
         "
 next: `ingrain decisions add \"...\"` to record a decision, `ingrain decisions extract --doc AGENTS.md`
-      to propose some, or `ingrain mine` then `ingrain propose` to learn rules from your corrections"
+      to propose some, or `ingrain rules mine` then `ingrain rules propose` to learn rules from your corrections"
     );
     Ok(ExitCode::SUCCESS)
 }

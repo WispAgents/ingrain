@@ -1,4 +1,4 @@
-use super::Outcome;
+use crate::cmd::Outcome;
 use crate::repo::Repo;
 use anyhow::Result;
 use ingrain_core::{AgentHunk, Correction, store};
@@ -30,7 +30,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     let corrections: Vec<Correction> = store::read(&repo.layout.corrections_file())?;
     let hunks: Vec<AgentHunk> = store::read(&repo.layout.agent_hunks_file())?;
     if corrections.is_empty() {
-        println!("no corrections yet; run `ingrain mine` first");
+        println!("no corrections yet; run `ingrain rules mine` first");
         return Ok(ExitCode::SUCCESS);
     }
     let existing: Vec<CompiledRule> = repo.compiled_rules()?.into_iter().map(|(_, c)| c).collect();
@@ -92,7 +92,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
             p.rule.meta.origin
         );
     }
-    println!("\nnext: `ingrain review`");
+    println!("\nnext: `ingrain rules review`");
     Ok(ExitCode::SUCCESS)
 }
 

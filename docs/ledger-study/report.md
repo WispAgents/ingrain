@@ -79,4 +79,4 @@ python3 -I judge.py /tmp/ledger/packs/packs.jsonl labels.jsonl 5
 python3 -I extract.py texts.jsonl extracted.jsonl 8
 ```
 
-Corrections come from `ingrain mine --pr-refs --github` ([WispAgents/ingrain](https://github.com/WispAgents/ingrain)).
+Corrections come from `ingrain rules mine --pr-refs --github` ([WispAgents/ingrain](https://github.com/WispAgents/ingrain)).

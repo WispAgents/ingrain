@@ -24,6 +24,15 @@ pub struct Args {
     diff: Option<String>,
     #[arg(long, value_enum, default_value = "text")]
     format: Format,
+    /// v0.1 hook form, still in older `.claude/settings.json` files. Use `ingrain hook`.
+    #[arg(long, value_enum, hide = true)]
+    hook: Option<LegacyHook>,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum LegacyHook {
+    PostEdit,
+    Stop,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -34,6 +43,16 @@ pub enum Format {
 }
 
 pub fn run(dir: &Path, args: Args) -> Outcome {
+    if let Some(legacy) = args.hook {
+        eprintln!(
+            "ingrain: `check --hook` is deprecated; re-run `ingrain init` to switch to `ingrain hook`"
+        );
+        let event = match legacy {
+            LegacyHook::PostEdit => super::hook::Event::PostToolUse,
+            LegacyHook::Stop => super::hook::Event::Stop,
+        };
+        return super::hook::run(dir, event, false);
+    }
     let repo = Repo::open(dir)?;
     let rules = repo.compiled_rules()?;
     let (base, context) = if args.staged {
@@ -68,7 +87,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     log(&repo, &findings, context)?;
     let violations: Vec<Violation> = {
         let checker = Checker::new(&decisions);
-        repo.decision_targets(&targets, &base)
+        repo.decision_targets(&base, (!only.is_empty()).then_some(only.as_slice()))?
             .iter()
             .flat_map(|t| checker.check(t))
             .collect()

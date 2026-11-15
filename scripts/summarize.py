@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate `ingrain eval --json` reports into a markdown table.
+"""Aggregate `ingrain rules eval --json` reports into a markdown table.
 
     python3 scripts/summarize.py <reports-dir>
 """

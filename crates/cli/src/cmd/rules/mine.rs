@@ -1,4 +1,4 @@
-use super::Outcome;
+use crate::cmd::Outcome;
 use crate::repo::Repo;
 use anyhow::{Context, Result};
 use ingrain_core::{Correction, store};

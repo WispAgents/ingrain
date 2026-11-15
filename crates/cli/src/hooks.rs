@@ -18,9 +18,44 @@ const EVENTS: &[(&str, Option<&str>, &str)] = &[
 ];
 
 /// Hook commands from v0.1 ingrain and the separate decision-ledger tool, replaced on install.
+/// Only these exact forms match, so a user's own hooks are never touched.
 fn is_legacy(command: &str) -> bool {
-    command.contains("ingrain check --hook") || command.contains("decisions hook")
+    const LEGACY: &[&str] = &[
+        "ingrain check --hook post-edit",
+        "ingrain check --hook stop",
+        "decisions hook session-start",
+        "decisions hook pre-tool-use",
+        "decisions hook stop",
+    ];
+    LEGACY.iter().any(|legacy| {
+        command.match_indices(legacy).any(|(i, _)| {
+            let before = command[..i].chars().next_back();
+            let after = command[i + legacy.len()..].chars().next();
+            let boundary = |c: Option<char>| {
+                c.is_none_or(|c| {
+                    !(c.is_alphanumeric() || c == '-' || c == '_' || c == '/' || c == '.')
+                })
+            };
+            boundary(before) && boundary(after)
+        })
+    })
 }
+
+/// True when Claude Code settings run an ingrain hook, current (`ingrain hook …`) or legacy.
+pub fn runs_ingrain(settings: &Value) -> bool {
+    let Some(events) = settings["hooks"].as_object() else {
+        return false;
+    };
+    events
+        .values()
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|group| group["hooks"].as_array())
+        .flatten()
+        .filter_map(|h| h["command"].as_str())
+        .any(|c| c.contains("ingrain hook ") || is_legacy(c))
+}
+
 const PRE_COMMIT_MARKER: &str = "# ingrain";
 
 /// What an install step did.
@@ -61,23 +96,30 @@ pub fn install_claude(root: &Path) -> Result<Outcome> {
     Ok(Outcome::Installed)
 }
 
-/// Drop hook groups that only run legacy commands; keep everything else.
+/// Remove legacy commands, and the groups that held only them. Groups that were already empty
+/// are left alone.
 fn remove_legacy(hooks: &mut Value) -> Result<bool> {
     let Some(events) = hooks.as_object_mut() else {
         return Ok(false);
     };
     let mut changed = false;
     for list in events.values_mut().filter_map(Value::as_array_mut) {
-        for group in list.iter_mut() {
+        let mut emptied = Vec::new();
+        for (i, group) in list.iter_mut().enumerate() {
             if let Some(hs) = group["hooks"].as_array_mut() {
                 let before = hs.len();
                 hs.retain(|h| !h["command"].as_str().is_some_and(is_legacy));
-                changed |= hs.len() != before;
+                if hs.len() != before {
+                    changed = true;
+                    if hs.is_empty() {
+                        emptied.push(i);
+                    }
+                }
             }
         }
-        let before = list.len();
-        list.retain(|g| g["hooks"].as_array().is_none_or(|hs| !hs.is_empty()));
-        changed |= list.len() != before;
+        for i in emptied.into_iter().rev() {
+            list.remove(i);
+        }
     }
     Ok(changed)
 }
@@ -183,6 +225,17 @@ mod tests {
         for event in ["SessionStart", "PreToolUse", "PostToolUse", "Stop"] {
             assert_eq!(v["hooks"][event].as_array().unwrap().len(), 1, "{event}");
         }
+    }
+
+    #[test]
+    fn legacy_match_is_exact() {
+        assert!(is_legacy(
+            "command -v ingrain >/dev/null 2>&1 && ingrain check --hook post-edit || true"
+        ));
+        assert!(is_legacy("decisions hook stop"));
+        assert!(!is_legacy("./scripts/sync-decisions hook pre-push"));
+        assert!(!is_legacy("my-decisions hook stop"));
+        assert!(!is_legacy("ingrain hook stop"));
     }
 
     #[test]

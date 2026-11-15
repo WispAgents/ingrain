@@ -34,16 +34,56 @@ pub enum Event {
     Stop,
 }
 
-pub fn run(dir: &Path, event: Event) -> Outcome {
+pub fn run(dir: &Path, event: Event, from_plugin: bool) -> Outcome {
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let payload: Value = serde_json::from_str(&input).unwrap_or(json!({}));
-    match handle(dir, event, &payload) {
+    let result = if from_plugin && plugin_steps_aside(dir, &payload) {
+        Ok(None)
+    } else {
+        handle(dir, event, &payload)
+    };
+    match result {
         Ok(Some(answer)) => println!("{answer}"),
         Ok(None) => {}
         Err(e) => eprintln!("ingrain hook error (ignored): {e:#}"),
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// A plugin hook (`--from-plugin`) answers only in repos set up for ingrain whose own Claude Code
+/// settings don't already run it: the plugin is installed for every repo, and must neither act in
+/// repos that never chose ingrain nor answer twice where the repo's hooks do.
+fn plugin_steps_aside(dir: &Path, payload: &Value) -> bool {
+    let dir = payload["cwd"].as_str().map(Path::new).unwrap_or(dir);
+    if ingrain_core::Git::open(dir).is_err() {
+        return true; // not a git repo
+    }
+    let repo = match Repo::open(dir) {
+        Ok(repo) => repo,
+        Err(e) => {
+            eprintln!("ingrain hook error (ignored): {e:#}");
+            return true;
+        }
+    };
+    let set_up = repo.layout.corrections_dir().is_dir() || !repo.ledger.live_lenient().is_empty();
+    if !set_up {
+        return true;
+    }
+    // Claude Code reads settings from the project dir it was started in, which in a monorepo
+    // can be below the git root.
+    let mut roots = vec![repo.git.root().to_path_buf()];
+    if let Some(project) = std::env::var_os("CLAUDE_PROJECT_DIR") {
+        roots.push(project.into());
+    }
+    roots.iter().any(|root| {
+        ["settings.json", "settings.local.json"].iter().any(|f| {
+            std::fs::read_to_string(root.join(".claude").join(f))
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .is_some_and(|settings| crate::hooks::runs_ingrain(&settings))
+        })
+    })
 }
 
 /// The JSON to print, if any.
@@ -73,6 +113,9 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
         Event::PostToolUse => post_tool_use(&repo, &mut session, payload)?,
         Event::Stop => stop(&repo, &decisions, &mut session)?,
     };
+    // Hooks for parallel tool calls can overlap: keep files others recorded meanwhile.
+    let on_disk = Session::load(&sessions, session_id);
+    session.edited.extend(on_disk.edited);
     session.save(&sessions, session_id)?;
     Ok(answer)
 }
@@ -127,8 +170,8 @@ fn pre_tool_use(
     session: &mut Session,
     payload: &Value,
 ) -> Option<Value> {
+    // Not recorded as edited here: the edit may still be denied. PostToolUse records it.
     let rel = edited_path(repo, payload)?;
-    session.edited.insert(rel.clone());
     if decisions.is_empty() {
         return None;
     }
@@ -212,7 +255,7 @@ fn stop(repo: &Repo, decisions: &[Record], session: &mut Session) -> Result<Opti
     let blocked: Vec<&Finding> = super::check::active(&findings, Mode::Block);
     let violations: Vec<Violation> = {
         let checker = Checker::new(decisions);
-        repo.decision_targets(&targets, &DiffBase::Head)
+        repo.decision_targets(&DiffBase::Head, Some(&edited))?
             .iter()
             .flat_map(|t| checker.check(t))
             .collect()

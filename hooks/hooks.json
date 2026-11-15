@@ -1,0 +1,47 @@
+{
+  "description": "ingrain hooks: decisions at session start and before edits, learned rules after edits, both at the end of a turn. They do nothing until the ingrain binary is installed, or when the repository's own settings already run ingrain.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v ingrain >/dev/null 2>&1 && ingrain hook session-start --from-plugin || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v ingrain >/dev/null 2>&1 && ingrain hook pre-tool-use --from-plugin || true"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v ingrain >/dev/null 2>&1 && ingrain hook post-tool-use --from-plugin || true"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v ingrain >/dev/null 2>&1 && ingrain hook stop --from-plugin || true"
+          }
+        ]
+      }
+    ]
+  }
+}

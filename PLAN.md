@@ -58,7 +58,7 @@ Group key = language family + sorted removed set. Pure additions (no removed tok
 - Accept a candidate only if: matches ≥ min_support befores (hits on the changed lines), matches 0 afters,
   and precision on known agent hunks (corrected vs kept) ≥ threshold.
 
-### Time-split evaluation (`ingrain eval`)
+### Time-split evaluation (`ingrain rules eval`)
 Corrections and agent hunks sorted by time; cutoff T at a fraction of the timeline.
 Learn only from data before T; freeze rules; score after T:
 - recall = share of post-T corrections whose before is flagged on the changed lines (and after is not)
@@ -125,8 +125,10 @@ one check, one Action. The decision-ledger repo is removed after wisp moves over
 - New crate `crates/ledger` (`ingrain-ledger`): decision records, scope, decision checks, manifests,
   extraction, agent messages. Reuses `ingrain-core` (git, diff) and `ingrain-engine` (ast-grep).
 - `ingrain-core::git` takes the ledger's improved version (relative_in_repo, before_rev, -w, end-of-options).
-- CLI: `ingrain decisions <add|extract|review|accept|reject|supersede|list|show|for|stale>`.
-- One hook entry point: `ingrain hook <session-start|pre-tool-use|post-tool-use|stop>`.
+- CLI: `ingrain decisions <add|extract|review|accept|reject|supersede|list|show|for|stale>` and
+  `ingrain rules <mine|propose|review|accept|reject|list|mode|promote|eval>` (user request: both groups namespaced).
+- One hook entry point: `ingrain hook <session-start|pre-tool-use|post-tool-use|stop>`; `check --hook` kept hidden
+  for v0.1 settings, with a deprecation note.
   session-start: repo-wide decisions. pre-tool-use: deny edits breaking decision checks, else scoped
   decisions once per session. post-tool-use: learned rules (old post-edit). stop: both, edited files only.
 - `ingrain check` runs learned rules and decision checks together (pre-commit, CI, Action).
@@ -144,3 +146,31 @@ one check, one Action. The decision-ledger repo is removed after wisp moves over
 - [ ] 8. Remove decision-ledger repo (after confirmation)
 
 - 2026-11-16: merged; 80 tests green, clippy clean; live Claude Code check: SessionStart context + PreToolUse deny work with `ingrain hook`.
+- Merge review (Claude subagent): manifests skipped by pre-commit/CI/Stop, denied edits marked as edited, `-w` losing
+  wrap-and-reindent corrections in mining, silent v0.1 hook breakage, over-broad legacy hook removal. All fixed with tests.
+- Learned-rule commands moved under `ingrain rules`. 83 tests green, clippy clean.
+
+---
+
+# v0.2.1: skills and plugin (easy install)
+
+Goal: a developer adds ingrain to their agent and repo in one or two commands.
+
+## Decisions
+- The ingrain repo is a Claude Code plugin and its own marketplace: `.claude-plugin/marketplace.json`
+  (plugin source `./`) and `.claude-plugin/plugin.json`. `hooks/hooks.json` runs
+  `ingrain hook <event> --from-plugin`; skills under `skills/`.
+- The same `skills/<name>/SKILL.md` folders install into Codex, Cursor and others with `npx skills add WispAgents/ingrain`.
+- Skills: `ingrain-setup` (install the binary, init, seed decisions from AGENTS.md, review with the user),
+  `ingrain-decide` (record or change a decision from the conversation), `ingrain-rules` (mine and review learned rules).
+- No double hooks: a `--from-plugin` hook does nothing when the repo's `.claude/settings.json` already runs ingrain.
+- Agents without hooks: `ingrain init --agents-md` writes a marked, idempotent ingrain block into AGENTS.md.
+
+## Steps
+- [x] 1. hook --from-plugin; init --agents-md
+- [x] 2. skills (3) + plugin + marketplace; `claude plugin validate .` passes
+- [x] 3. tried both installs: `claude plugin marketplace add` + `install` (isolated config) OK;
+  `npx skills add <path>` lists 3 skills, installs to .agents/skills (+ .claude/skills symlink).
+  One live agent run with `--plugin-dir` on a scratch repo used ingrain-setup end to end: 2 decisions
+  with checks, commit on a branch. Found: extract read ingrain's own AGENTS.md block → fixed (skipped).
+- [ ] 4. README "Use it from your coding agent" (done); PR, review, merge; release v0.2.1; tap
