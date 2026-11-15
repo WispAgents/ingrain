@@ -1,0 +1,12 @@
+{
+  "name": "ingrain",
+  "description": "ingrain: decisions and learned rules for coding agents",
+  "owner": { "name": "WispAgents", "url": "https://github.com/WispAgents" },
+  "plugins": [
+    {
+      "name": "ingrain",
+      "source": "./",
+      "description": "Recorded decisions and rules learned from your corrections, shown before each edit and enforced by hooks, pre-commit and CI. Needs the ingrain binary; the ingrain-setup skill installs it."
+    }
+  ]
+}

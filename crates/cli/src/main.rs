@@ -2,6 +2,7 @@
 //! lint rules learned from your corrections are shown and enforced where the agent edits,
 //! before commit and in CI.
 
+mod agents_md;
 mod check;
 mod cmd;
 mod hitlog;
@@ -40,7 +41,12 @@ enum Command {
         command: cmd::rules::Command,
     },
     /// Claude Code hook entry point (reads the hook JSON on stdin).
-    Hook { event: cmd::hook::Event },
+    Hook {
+        event: cmd::hook::Event,
+        /// Set by the Claude Code plugin; does nothing when the repo's own settings run ingrain.
+        #[arg(long)]
+        from_plugin: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -50,7 +56,7 @@ fn main() -> ExitCode {
         Command::Init(args) => cmd::init::run(&dir, args),
         Command::Check(args) => cmd::check::run(&dir, args),
         Command::Decisions { command } => cmd::decisions::run(&dir, command),
-        Command::Hook { event } => cmd::hook::run(&dir, event),
+        Command::Hook { event, from_plugin } => cmd::hook::run(&dir, event, from_plugin),
         Command::Rules { command } => cmd::rules::run(&dir, command),
     };
     match result {

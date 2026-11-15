@@ -18,13 +18,43 @@ Rules come from two places:
 
 Nothing becomes a rule without a person accepting it.
 
+## Use it from your coding agent
+
+The fastest way in: give your agent the ingrain skills, then ask it to **"set up ingrain in this
+repo"**. The `ingrain-setup` skill installs the binary (after asking), runs `ingrain init`, turns
+the rules in your AGENTS.md / CONTRIBUTING.md into decisions for you to approve, and commits on a branch.
+
+**Claude Code** (plugin: skills + hooks):
+
+```
+/plugin marketplace add WispAgents/ingrain
+/plugin install ingrain@ingrain
+```
+
+**Any agent** (Claude Code, Codex, Cursor, Copilot, Gemini CLI, opencode and
+[more](https://github.com/vercel-labs/skills)):
+
+```sh
+npx skills add WispAgents/ingrain
+```
+
+| Skill | Use it for |
+|---|---|
+| `ingrain-setup` | Install and set up ingrain in a repo, seed decisions from your docs |
+| `ingrain-decide` | "From now on we don't use X": record, change or look up a decision |
+| `ingrain-rules` | Learn rules from past corrections, review them, set shadow / warn / block |
+
+The plugin's hooks do nothing until the `ingrain` binary is installed, or when the repo's own
+`.claude/settings.json` already runs ingrain (no double checks). Agents without hooks get an
+ingrain section in AGENTS.md (`ingrain init --agents-md`) and are caught by pre-commit and CI.
+
 ## Install
 
 ```sh
 brew install wispagents/tap/ingrain
 # or a prebuilt binary from https://github.com/WispAgents/ingrain/releases
 # or from source:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.0 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.1 ingrain
 ```
 
 Needs `git`. Optional: `gh` (logged in) to read GitHub PRs, reviews and issues; Claude Code
@@ -170,7 +200,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.2.0
+      - uses: WispAgents/ingrain/action@v0.2.1
 ```
 
 ## Layout

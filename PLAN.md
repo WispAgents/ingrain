@@ -149,3 +149,28 @@ one check, one Action. The decision-ledger repo is removed after wisp moves over
 - Merge review (Claude subagent): manifests skipped by pre-commit/CI/Stop, denied edits marked as edited, `-w` losing
   wrap-and-reindent corrections in mining, silent v0.1 hook breakage, over-broad legacy hook removal. All fixed with tests.
 - Learned-rule commands moved under `ingrain rules`. 83 tests green, clippy clean.
+
+---
+
+# v0.2.1: skills and plugin (easy install)
+
+Goal: a developer adds ingrain to their agent and repo in one or two commands.
+
+## Decisions
+- The ingrain repo is a Claude Code plugin and its own marketplace: `.claude-plugin/marketplace.json`
+  (plugin source `./`) and `.claude-plugin/plugin.json`. `hooks/hooks.json` runs
+  `ingrain hook <event> --from-plugin`; skills under `skills/`.
+- The same `skills/<name>/SKILL.md` folders install into Codex, Cursor and others with `npx skills add WispAgents/ingrain`.
+- Skills: `ingrain-setup` (install the binary, init, seed decisions from AGENTS.md, review with the user),
+  `ingrain-decide` (record or change a decision from the conversation), `ingrain-rules` (mine and review learned rules).
+- No double hooks: a `--from-plugin` hook does nothing when the repo's `.claude/settings.json` already runs ingrain.
+- Agents without hooks: `ingrain init --agents-md` writes a marked, idempotent ingrain block into AGENTS.md.
+
+## Steps
+- [x] 1. hook --from-plugin; init --agents-md
+- [x] 2. skills (3) + plugin + marketplace; `claude plugin validate .` passes
+- [x] 3. tried both installs: `claude plugin marketplace add` + `install` (isolated config) OK;
+  `npx skills add <path>` lists 3 skills, installs to .agents/skills (+ .claude/skills symlink).
+  One live agent run with `--plugin-dir` on a scratch repo used ingrain-setup end to end: 2 decisions
+  with checks, commit on a branch. Found: extract read ingrain's own AGENTS.md block → fixed (skipped).
+- [ ] 4. README "Use it from your coding agent" (done); PR, review, merge; release v0.2.1; tap

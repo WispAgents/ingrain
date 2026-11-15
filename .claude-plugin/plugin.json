@@ -1,0 +1,10 @@
+{
+  "name": "ingrain",
+  "version": "0.2.1",
+  "description": "Keep coding agents in line with what your team decided: recorded decisions and rules learned from your corrections, shown before each edit and enforced by hooks, pre-commit and CI.",
+  "author": { "name": "WispAgents", "url": "https://github.com/WispAgents" },
+  "homepage": "https://github.com/WispAgents/ingrain",
+  "repository": "https://github.com/WispAgents/ingrain",
+  "license": "Apache-2.0",
+  "keywords": ["decisions", "lint", "conventions", "hooks", "ast-grep"]
+}

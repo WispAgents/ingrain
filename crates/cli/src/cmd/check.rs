@@ -51,7 +51,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
             LegacyHook::PostEdit => super::hook::Event::PostToolUse,
             LegacyHook::Stop => super::hook::Event::Stop,
         };
-        return super::hook::run(dir, event);
+        return super::hook::run(dir, event, false);
     }
     let repo = Repo::open(dir)?;
     let rules = repo.compiled_rules()?;

@@ -34,16 +34,33 @@ pub enum Event {
     Stop,
 }
 
-pub fn run(dir: &Path, event: Event) -> Outcome {
+pub fn run(dir: &Path, event: Event, from_plugin: bool) -> Outcome {
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let payload: Value = serde_json::from_str(&input).unwrap_or(json!({}));
-    match handle(dir, event, &payload) {
+    let result = if from_plugin && repo_runs_ingrain(dir, &payload) {
+        Ok(None) // the repo's own hooks answer; don't run twice
+    } else {
+        handle(dir, event, &payload)
+    };
+    match result {
         Ok(Some(answer)) => println!("{answer}"),
         Ok(None) => {}
         Err(e) => eprintln!("ingrain hook error (ignored): {e:#}"),
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// True when the repository's committed or local Claude Code settings already run `ingrain hook`.
+fn repo_runs_ingrain(dir: &Path, payload: &Value) -> bool {
+    let dir = payload["cwd"].as_str().map(Path::new).unwrap_or(dir);
+    let Ok(git) = ingrain_core::Git::open(dir) else {
+        return false;
+    };
+    ["settings.json", "settings.local.json"].iter().any(|f| {
+        std::fs::read_to_string(git.root().join(".claude").join(f))
+            .is_ok_and(|t| t.contains("ingrain hook "))
+    })
 }
 
 /// The JSON to print, if any.

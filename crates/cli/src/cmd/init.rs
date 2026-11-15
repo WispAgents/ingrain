@@ -12,6 +12,10 @@ pub struct Args {
     /// Don't install the git pre-commit hook.
     #[arg(long)]
     no_git_hook: bool,
+    /// Also add an ingrain section to AGENTS.md, for agents that read it but run no hooks
+    /// (Codex, Cursor, Copilot…).
+    #[arg(long)]
+    agents_md: bool,
 }
 
 pub fn run(dir: &Path, args: Args) -> Outcome {
@@ -45,6 +49,14 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
             "Claude Code hooks (.claude/settings.json)",
             hooks::install_claude(repo.git.root())?,
         );
+    }
+    if args.agents_md {
+        let path = repo.git.root().join("AGENTS.md");
+        if crate::agents_md::write(&path)? {
+            println!("updated the ingrain section in {}", path.display());
+        } else {
+            println!("AGENTS.md: ingrain section already up to date");
+        }
     }
     if !args.no_git_hook {
         report(

@@ -85,6 +85,21 @@ pub fn commits(git: &Git, since: i64, max: usize) -> Result<Vec<Text>> {
         .collect())
 }
 
+/// Markers around the block `ingrain init --agents-md` writes into AGENTS.md. Extraction skips
+/// the block: it describes ingrain itself, not the project's decisions.
+pub const AGENTS_BLOCK_START: &str = "<!-- ingrain:start -->";
+pub const AGENTS_BLOCK_END: &str = "<!-- ingrain:end -->";
+
+/// `text` without ingrain's own AGENTS.md block.
+fn without_ingrain_block(text: &str) -> String {
+    match (text.find(AGENTS_BLOCK_START), text.find(AGENTS_BLOCK_END)) {
+        (Some(a), Some(b)) if a < b => {
+            format!("{}{}", &text[..a], &text[b + AGENTS_BLOCK_END.len()..])
+        }
+        _ => text.to_owned(),
+    }
+}
+
 /// Sections of docs that state the project's rules (AGENTS.md, CONTRIBUTING.md, an ADR folder),
 /// split at headings and blank-line paragraphs into pieces of at most ~2,500 characters.
 pub fn docs(git: &Git, paths: &[String]) -> Result<Vec<Text>> {
@@ -93,6 +108,7 @@ pub fn docs(git: &Git, paths: &[String]) -> Result<Vec<Text>> {
         let rel = git.relative(Path::new(path));
         let text = std::fs::read_to_string(git.root().join(&rel))
             .with_context(|| format!("reading {rel}"))?;
+        let text = without_ingrain_block(&text);
         // Last commit touching the file, so the record's date means something.
         let time = git
             .try_run(&["log", "-1", "--format=%ct", "--", &rel])
@@ -394,7 +410,7 @@ mod tests {
             .unwrap();
         std::fs::write(
             dir.path().join("AGENTS.md"),
-            "# Rules\n\nUse apiClient.\n\n## Tests\n\nNo network in unit tests.\n",
+            "# Rules\n\nUse apiClient.\n\n<!-- ingrain:start -->\n## ingrain\n\nRun ingrain check.\n<!-- ingrain:end -->\n\n## Tests\n\nNo network in unit tests.\n",
         )
         .unwrap();
         let git = Git::open(dir.path()).unwrap();
@@ -402,6 +418,10 @@ mod tests {
         assert_eq!(texts.len(), 2);
         assert_eq!(texts[0].id, "doc:AGENTS.md#1");
         assert!(texts[1].text.contains("No network"));
+        assert!(
+            texts.iter().all(|t| !t.text.contains("ingrain")),
+            "ingrain's own AGENTS.md block is skipped"
+        );
         assert!(
             texts.iter().all(worth_reading),
             "short doc sections still count"
