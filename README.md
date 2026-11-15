@@ -25,7 +25,10 @@ corrections ──► clusters ──► candidate rules ──► backtest ─�
 ## Install
 
 ```sh
-cargo install --locked --git https://github.com/WispAgents/ingrain ingrain
+brew install wispagents/tap/ingrain
+# or a prebuilt binary from https://github.com/WispAgents/ingrain/releases
+# or from source:
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.1.0 ingrain
 ```
 
 Needs `git`. `gh` (logged in) for PR review suggestions. Optional: Claude Code (`claude`) or
