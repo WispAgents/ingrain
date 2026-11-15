@@ -27,7 +27,7 @@ runs:
         mkdir -p "$dir"
         if [ "$RUNNER_OS" = Windows ]; then
           curl -fsSL "$base.zip" -o "$dir/ingrain.zip"
-          unzip -q -o "$dir/ingrain.zip" -d "$dir"
+          pwsh -NoProfile -Command "Expand-Archive -Force -Path '$dir/ingrain.zip' -DestinationPath '$dir'"
         else
           curl -fsSL "$base.tar.gz" | tar -xz -C "$dir"
         fi

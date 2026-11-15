@@ -198,16 +198,7 @@ fn read_line(input: &mut impl BufRead) -> Result<Option<String>> {
 /// Edit the proposal in $EDITOR; it must still parse. The id is kept.
 fn edit(repo: &Repo, id: &str) -> Result<()> {
     let path = repo.ledger.pending_path(id)?;
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| if cfg!(windows) { "notepad" } else { "vi" }.into());
-    let status = ingrain_core::process::command(&editor)
-        .arg(&path)
-        .status()
-        .with_context(|| format!("starting {editor}"))?;
-    if !status.success() {
-        bail!("{editor} exited with {status}");
-    }
+    ingrain_core::process::edit(&path)?;
     let mut r = Record::load(&path).context("the edited proposal doesn't parse")?;
     if r.id != id {
         r.id = id.to_owned();
