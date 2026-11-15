@@ -55,7 +55,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     println!(
         "
 next: `ingrain decisions add \"...\"` to record a decision, `ingrain decisions extract --doc AGENTS.md`
-      to propose some, or `ingrain mine` then `ingrain propose` to learn rules from your corrections"
+      to propose some, or `ingrain rules mine` then `ingrain rules propose` to learn rules from your corrections"
     );
     Ok(ExitCode::SUCCESS)
 }

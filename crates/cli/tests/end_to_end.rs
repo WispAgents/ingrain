@@ -109,7 +109,7 @@ fn learns_a_rule_and_enforces_it_everywhere() {
     assert!(dir.join(".claude/settings.json").exists());
     assert!(dir.join(".git/hooks/pre-commit").exists());
 
-    let out = ingrain(dir, &["mine", "--no-transcripts"]);
+    let out = ingrain(dir, &["rules", "mine", "--no-transcripts"]);
     assert!(
         out.status.success(),
         "{}",
@@ -121,7 +121,7 @@ fn learns_a_rule_and_enforces_it_everywhere() {
         stdout(&out)
     );
 
-    let out = ingrain(dir, &["propose", "--llm", "none"]);
+    let out = ingrain(dir, &["rules", "propose", "--llm", "none"]);
     assert!(
         out.status.success(),
         "{}",
@@ -138,7 +138,7 @@ fn learns_a_rule_and_enforces_it_everywhere() {
     );
 
     // Proposals stay out of git; accepted rules get staged.
-    let out = ingrain(dir, &["accept", "avoid-fetch-call"]);
+    let out = ingrain(dir, &["rules", "accept", "avoid-fetch-call"]);
     assert!(
         out.status.success(),
         "{}",
@@ -173,7 +173,7 @@ fn learns_a_rule_and_enforces_it_everywhere() {
 
     // Block mode: CLI fails and names the rule and line.
     assert!(
-        ingrain(dir, &["mode", "avoid-fetch-call", "block"])
+        ingrain(dir, &["rules", "mode", "avoid-fetch-call", "block"])
             .status
             .success()
     );
@@ -246,7 +246,7 @@ fn learns_a_rule_and_enforces_it_everywhere() {
     assert!(out.status.success());
 
     // Rules list shows hits and the override.
-    let out = ingrain(dir, &["rules"]);
+    let out = ingrain(dir, &["rules", "list"]);
     assert!(
         stdout(&out).contains("avoid-fetch-call"),
         "{}",
@@ -263,13 +263,32 @@ fn reject_needs_a_reason_and_is_remembered() {
             .status
             .success()
     );
-    assert!(ingrain(dir, &["mine", "--no-transcripts"]).status.success());
-    assert!(ingrain(dir, &["propose", "--llm", "none"]).status.success());
-    let out = ingrain(dir, &["reject", "avoid-fetch-call", "--reason", " "]);
+    assert!(
+        ingrain(dir, &["rules", "mine", "--no-transcripts"])
+            .status
+            .success()
+    );
+    assert!(
+        ingrain(dir, &["rules", "propose", "--llm", "none"])
+            .status
+            .success()
+    );
+    let out = ingrain(
+        dir,
+        &[
+            "rules",
+            "list",
+            "reject",
+            "avoid-fetch-call",
+            "--reason",
+            " ",
+        ],
+    );
     assert!(!out.status.success());
     let out = ingrain(
         dir,
         &[
+            "rules",
             "reject",
             "avoid-fetch-call",
             "--reason",
@@ -283,7 +302,7 @@ fn reject_needs_a_reason_and_is_remembered() {
             .contains("we stream responses")
     );
     // Proposing again doesn't bring the rule back, under any id.
-    let out = ingrain(dir, &["propose", "--llm", "none"]);
+    let out = ingrain(dir, &["rules", "propose", "--llm", "none"]);
     let pending: Vec<String> = std::fs::read_dir(dir.join(".corrections/pending"))
         .unwrap()
         .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap_or_default())

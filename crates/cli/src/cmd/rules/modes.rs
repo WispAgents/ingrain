@@ -1,4 +1,4 @@
-use super::Outcome;
+use crate::cmd::Outcome;
 use crate::hitlog::{self, RuleStats};
 use crate::repo::Repo;
 use anyhow::Context;
@@ -108,7 +108,7 @@ pub fn promote(dir: &Path, apply: bool) -> Outcome {
     if apply {
         println!("applied; commit .corrections/rules/ so CI uses the new modes");
     } else {
-        println!("run `ingrain promote --apply` to apply");
+        println!("run `ingrain rules promote --apply` to apply");
     }
     Ok(ExitCode::SUCCESS)
 }

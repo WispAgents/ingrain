@@ -13,7 +13,7 @@ Rules come from two places:
   reviews, commits and sessions): "billing calls the payments client, never raw fetch", with a
   reason, a scope and optional checks. They live in `decisions/`.
 - **Lint rules learned from your corrections**: when you keep fixing the same thing in agent code,
-  `ingrain mine` and `ingrain propose` turn it into an ast-grep rule, tested on your history. They
+  `ingrain rules mine` and `ingrain rules propose` turn it into an ast-grep rule, tested on your history. They
   live in `.corrections/rules/`.
 
 Nothing becomes a rule without a person accepting it.
@@ -44,9 +44,9 @@ ingrain decisions add "Billing code calls the payments client, never raw fetch."
 ingrain decisions extract --doc AGENTS.md   # propose decisions from your rules doc, PRs, commits, sessions
 ingrain decisions review                    # accept / edit / reject
 
-ingrain mine --pr-refs --github             # capture corrections of agent code
-ingrain propose --explain                   # learn and backtest lint rules from them
-ingrain review                              # accept / edit / reject
+ingrain rules mine --pr-refs --github       # capture corrections of agent code
+ingrain rules propose --explain             # learn and backtest lint rules from them
+ingrain rules review                        # accept / edit / reject
 
 git commit decisions/ .corrections/ -m "ingrain rules"
 ```
@@ -91,7 +91,7 @@ To keep a line on purpose, add a comment with a reason, on the line or the line 
 const res = await fetch(url);
 ```
 
-Without a reason it doesn't count. Overrides are logged; `ingrain promote` and
+Without a reason it doesn't count. Overrides are logged; `ingrain rules promote` and
 `ingrain decisions stale` flag rules and decisions that are overridden often.
 
 ## Decisions
@@ -135,15 +135,15 @@ decisions ([docs/ledger-study](docs/ledger-study/report.md)).
 
 | Source | Signal |
 |---|---|
-| Git fix-ups (`ingrain mine`) | A human commit rewrites lines an agent commit added, within `window_days` |
+| Git fix-ups (`ingrain rules mine`) | A human commit rewrites lines an agent commit added, within `window_days` |
 | PR refs (`--pr-refs`) | Same, on `refs/pull/*/head`, so fix-ups inside PRs survive squash merges |
 | Review suggestions (`--github`) | A ```` ```suggestion ```` comment on agent-written lines |
 | Claude Code transcripts | The agent edits, you reply, the agent rewrites what it just wrote |
 
-`ingrain propose` clusters corrections by what they removed, writes rules (templates first, then a
+`ingrain rules propose` clusters corrections by what they removed, writes rules (templates first, then a
 model), and keeps a rule only if it catches the past mistakes, spares the fixed versions, and is
-precise on agent code humans kept. Accepted rules start in shadow mode; `ingrain promote` moves them
-to warn and block from their hit log. `ingrain eval` measures the whole loop on your history.
+precise on agent code humans kept. Accepted rules start in shadow mode; `ingrain rules promote` moves them
+to warn and block from their hit log. `ingrain rules eval` measures the whole loop on your history.
 
 Expect few rules at first: on 17 public repos, most human fixes of agent code were one-off bug fixes
 and taste, not repeated mistakes ([docs/validation.md](docs/validation.md)). Decisions you record
@@ -156,7 +156,7 @@ are the main lever; learned rules catch what repeats.
 | `init` | Create `decisions/` and `.corrections/`, install hooks |
 | `check [paths] [--staged \| --diff RANGE] [--format text\|json\|github]` | Rules and decisions on added lines |
 | `decisions add \| extract \| review \| accept \| reject \| supersede \| list \| show \| for \| stale` | The decision ledger |
-| `mine`, `propose [--explain]`, `review`, `accept`, `reject`, `rules`, `mode`, `promote`, `eval` | Learned rules |
+| `rules mine \| propose [--explain] \| review \| accept \| reject \| list \| mode \| promote \| eval` | Learned rules |
 | `hook <session-start\|pre-tool-use\|post-tool-use\|stop>` | Claude Code hook entry point |
 
 ## CI

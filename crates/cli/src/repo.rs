@@ -82,29 +82,56 @@ impl Repo {
         std::fs::read_to_string(self.git.root().join(rel)).ok()
     }
 
-    /// The same files as decision-check targets. Manifests also get their content before the
-    /// change, so a check sees which dependencies were added.
+    /// Files with added lines as decision-check targets. Unlike learned rules, decisions also
+    /// check files ast-grep can't parse (Cargo.toml, go.mod, requirements.txt), and
+    /// `config.ignore` doesn't apply to them. Manifests also get their content before the change,
+    /// so a check sees which dependencies were added.
     pub fn decision_targets(
         &self,
-        targets: &[crate::check::Target],
         base: &DiffBase,
-    ) -> Vec<ingrain_ledger::Target> {
+        only: Option<&[String]>,
+    ) -> Result<Vec<ingrain_ledger::Target>> {
+        use ingrain_core::git::Content;
+        let files: Vec<(String, Vec<ingrain_core::LineRange>)> = match only {
+            Some(paths) => paths
+                .iter()
+                .filter_map(|p| match self.git.added_lines_for(base, p) {
+                    Ok(added) => Some((p.clone(), added)),
+                    Err(e) => {
+                        eprintln!("ingrain: skipping {p}: {e:#}");
+                        None
+                    }
+                })
+                .collect(),
+            None => self.git.added_lines(base)?,
+        };
+        let side = base.content();
         let before_rev = base.before_rev(&self.git);
-        targets
-            .iter()
-            .filter(|t| !t.path.starts_with("decisions/"))
-            .map(|t| ingrain_ledger::Target {
-                path: t.path.clone(),
-                content: t.content.clone(),
-                added: Some(t.added.clone()),
-                before: if ingrain_ledger::manifest::is_manifest(&t.path) {
-                    before_rev
-                        .as_deref()
-                        .and_then(|rev| self.git.show(rev, &t.path))
-                } else {
-                    None
-                },
-            })
-            .collect()
+        let mut out = Vec::new();
+        for (path, added) in files {
+            if added.is_empty() || path.starts_with("decisions/") {
+                continue;
+            }
+            let content = match &side {
+                Content::WorkingTree => self.read(&path),
+                Content::Index => self.git.show_index(&path),
+                Content::Revision(rev) => self.git.show(rev, &path),
+            };
+            let Some(content) = content else { continue };
+            let before = if ingrain_ledger::manifest::is_manifest(&path) {
+                before_rev
+                    .as_deref()
+                    .and_then(|rev| self.git.show(rev, &path))
+            } else {
+                None
+            };
+            out.push(ingrain_ledger::Target {
+                path,
+                content,
+                added: Some(added),
+                before,
+            });
+        }
+        Ok(out)
     }
 }

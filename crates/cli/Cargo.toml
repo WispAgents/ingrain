@@ -1,6 +1,6 @@
 [package]
 name = "ingrain"
-description = "Learn lint rules from the corrections humans make to coding-agent output, and enforce them"
+description = "Keep coding agents in line with what your team decided: recorded decisions and rules learned from your corrections, enforced at edit time, before commit and in CI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
