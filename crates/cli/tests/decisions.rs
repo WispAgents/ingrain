@@ -1,0 +1,431 @@
+//! The whole loop on a scripted repository: init, add, hooks, check, extract (with a fake
+//! `claude` on PATH), review, supersede, stale.
+
+use serde_json::{Value, json};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+
+fn bin_dir(tmp: &Path) -> PathBuf {
+    let dir = tmp.join(".bin");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn path_env(tmp: &Path) -> String {
+    let own = Path::new(env!("CARGO_BIN_EXE_ingrain"))
+        .parent()
+        .unwrap()
+        .display()
+        .to_string();
+    format!(
+        "{}:{own}:{}",
+        bin_dir(tmp).display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("PATH", path_env(dir))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Ledger commands live under `ingrain decisions`; `init`, `check` and `hook` are top level.
+fn prefix<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    match args.first() {
+        Some(&("init" | "check" | "hook")) => args.to_vec(),
+        _ => std::iter::once("decisions")
+            .chain(args.iter().copied())
+            .collect(),
+    }
+}
+
+fn run(dir: &Path, args: &[&str], stdin: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ingrain"))
+        .args(prefix(args))
+        .current_dir(dir)
+        .env("HOME", dir.join(".home"))
+        .env("PATH", path_env(dir))
+        .env_remove("ANTHROPIC_API_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+fn ok(dir: &Path, args: &[&str]) -> String {
+    let out = run(dir, args, "");
+    assert!(
+        out.status.success(),
+        "decisions {args:?}: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn hook(dir: &Path, event: &str, payload: Value) -> Option<Value> {
+    let out = run(dir, &["hook", event], &payload.to_string());
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    (!text.trim().is_empty()).then(|| serde_json::from_str(&text).expect("hook prints JSON"))
+}
+
+fn repo() -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    git(dir, &["init", "-q", "-b", "main"]);
+    git(dir, &["config", "user.email", "dev@example.com"]);
+    git(dir, &["config", "user.name", "Dev"]);
+    std::fs::create_dir_all(dir.join("src/billing")).unwrap();
+    std::fs::write(
+        dir.join("src/billing/charge.ts"),
+        "export const charge = () => 1;\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 1;\n").unwrap();
+    std::fs::write(dir.join("package.json"), "{\n  \"dependencies\": {}\n}\n").unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "init"]);
+    tmp
+}
+
+#[test]
+fn records_inject_block_and_supersede() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init"]);
+    assert!(dir.join(".claude/settings.json").exists());
+
+    let out = ok(
+        dir,
+        &[
+            "add",
+            "Billing code calls the payments client, never raw fetch.",
+            "--reason",
+            "the client adds idempotency keys",
+            "--scope",
+            "src/billing/**",
+            "--forbid-pattern",
+            "TypeScript:fetch($$$A)",
+            "--forbid-import",
+            "axios",
+        ],
+    );
+    assert!(out.contains("added D-0001"), "{out}");
+    ok(
+        dir,
+        &[
+            "add",
+            "Keep the cache on SQLite.",
+            "--forbid-dep",
+            "redis",
+            "--category",
+            "architecture",
+        ],
+    );
+    git(dir, &["commit", "-qm", "decisions"]);
+
+    // Session start shows repo-wide decisions.
+    let start = hook(
+        dir,
+        "session-start",
+        json!({"session_id": "s1", "cwd": dir}),
+    )
+    .unwrap();
+    let text = start["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(text.contains("D-0002: Keep the cache on SQLite."), "{text}");
+
+    // An edit that breaks D-0001 is refused before it happens.
+    let file = dir.join("src/billing/charge.ts");
+    let bad = json!({"session_id": "s1", "cwd": dir, "tool_name": "Edit",
+        "tool_input": {"file_path": file, "old_string": "=> 1", "new_string": "=> fetch('/pay')"}});
+    let deny = hook(dir, "pre-tool-use", bad).unwrap();
+    assert_eq!(deny["hookSpecificOutput"]["permissionDecision"], "deny");
+    let reason = deny["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap();
+    assert!(
+        reason.contains("D-0001") && reason.contains("decisions supersede"),
+        "{reason}"
+    );
+
+    // A clean edit gets the scoped decision as context, once per session.
+    let good = json!({"session_id": "s1", "cwd": dir, "tool_name": "Edit",
+        "tool_input": {"file_path": file, "old_string": "=> 1", "new_string": "=> payments.charge()"}});
+    let ctx = hook(dir, "pre-tool-use", good.clone()).unwrap();
+    assert!(
+        ctx["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("D-0001")
+    );
+    assert!(
+        hook(dir, "pre-tool-use", good).is_none(),
+        "already shown this session"
+    );
+
+    // Unrelated file: no billing decision.
+    let ui = json!({"session_id": "s1", "cwd": dir, "tool_name": "Write", "tool_input": {"file_path": dir.join("src/ui.ts"), "content": "export const ui = 2;\n"}});
+    assert!(hook(dir, "pre-tool-use", ui).is_none());
+
+    // A dependency the ledger forbids, in a manifest.
+    let dep = json!({"session_id": "s1", "cwd": dir, "tool_name": "Edit",
+        "tool_input": {"file_path": dir.join("package.json"), "old_string": "{}", "new_string": "{ \"redis\": \"^4\" }"}});
+    assert_eq!(
+        hook(dir, "pre-tool-use", dep).unwrap()["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+
+    // If the bad code lands anyway (written outside the hook), Stop sends the turn back,
+    // but only for files this session edited.
+    std::fs::write(&file, "export const charge = () => fetch('/pay');\n").unwrap();
+    let stop = hook(dir, "stop", json!({"session_id": "s1", "cwd": dir})).unwrap();
+    assert_eq!(stop["decision"], "block");
+    assert!(hook(dir, "stop", json!({"session_id": "other", "cwd": dir})).is_none());
+
+    // CLI check, staged check, GitHub annotations, override.
+    assert_eq!(run(dir, &["check"], "").status.code(), Some(1));
+    git(dir, &["add", "src/billing/charge.ts"]);
+    assert_eq!(run(dir, &["check", "--staged"], "").status.code(), Some(1));
+    let gh = String::from_utf8_lossy(&run(dir, &["check", "--format", "github"], "").stdout)
+        .into_owned();
+    assert!(
+        gh.starts_with("::error file=src/billing/charge.ts,line=1,title=decision D-0001::"),
+        "{gh}"
+    );
+    std::fs::write(&file, "// decisions-ignore D-0001: webhook replay needs raw fetch\nexport const charge = () => fetch('/pay');\n").unwrap();
+    assert!(ok(dir, &["check"]).contains("[overridden]"));
+
+    // `for` lists what applies.
+    assert!(ok(dir, &["for", "src/billing/charge.ts"]).contains("D-0001"));
+
+    // Supersede: proposal first; the old decision stays live until accepted.
+    let out = ok(
+        dir,
+        &[
+            "supersede",
+            "D-0002",
+            "--decision",
+            "Use Redis for the cache.",
+            "--reason",
+            "multi-node deploys",
+        ],
+    );
+    let pid = out.split_whitespace().nth(1).unwrap().to_owned();
+    assert!(ok(dir, &["list"]).contains("D-0002"));
+    ok(dir, &["accept", &pid]);
+    let list = ok(dir, &["list", "--all"]);
+    assert!(list.contains("D-0003: Use Redis for the cache."), "{list}");
+    assert!(
+        list.contains("D-0002: Keep the cache on SQLite. [superseded by D-0003]"),
+        "{list}"
+    );
+    assert!(!ok(dir, &["list"]).contains("D-0002"));
+    assert!(ok(dir, &["stale"]).contains("no stale decisions"));
+}
+
+#[test]
+fn extract_proposes_and_review_remembers_rejections() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-claude", "--no-git-hook"]);
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 2;\n").unwrap();
+    git(
+        dir,
+        &[
+            "commit",
+            "-qam",
+            "ui: render with the design-system Button\n\nWe decided all buttons come from @acme/ds; hand-rolled <button> elements drift from the theme.",
+        ],
+    );
+
+    // A fake `claude` that answers every extraction call the same way.
+    let fake = bin_dir(dir).join("claude");
+    let reply = r#"{"results":[{"id":"ANY","records":[{"decision":"Render buttons with the @acme/ds Button, not raw <button>.","reason":"raw buttons drift from the theme","scope":["src/**"],"category":"convention"}]}]}"#;
+    std::fs::write(&fake, format!("#!/bin/sh\ncat >/dev/null\nsed \"s/ANY/$(git -C '{}' log -1 --format=%H | cut -c1-12 | sed 's/^/c/')/\" <<'EOF'\n{reply}\nEOF\n", dir.display())).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let out = ok(
+        dir,
+        &[
+            "extract",
+            "--llm",
+            "claude",
+            "--no-github",
+            "--no-sessions",
+            "--since",
+            "2000-01-01",
+        ],
+    );
+    assert!(out.contains("1 proposals"), "{out}");
+    let pending: Vec<_> = std::fs::read_dir(dir.join("decisions/pending"))
+        .unwrap()
+        .collect();
+    assert_eq!(pending.len(), 1);
+    let id = pending[0]
+        .as_ref()
+        .unwrap()
+        .path()
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+
+    let extract = |dir: &Path| {
+        ok(
+            dir,
+            &[
+                "extract",
+                "--llm",
+                "claude",
+                "--no-github",
+                "--no-sessions",
+                "--since",
+                "2000-01-01",
+            ],
+        )
+    };
+
+    // Texts already read aren't read again.
+    let again = extract(dir);
+    assert!(again.contains("0 new texts worth reading"), "{again}");
+
+    // Reject needs a reason, and the decision isn't proposed again.
+    assert!(
+        !run(dir, &["reject", &id, "--reason", " "], "")
+            .status
+            .success()
+    );
+    ok(
+        dir,
+        &[
+            "reject",
+            &id,
+            "--reason",
+            "we're dropping the design system",
+        ],
+    );
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 3;\n").unwrap();
+    git(
+        dir,
+        &[
+            "commit",
+            "-qam",
+            "ui: more buttons from the design system\n\nAgain: all buttons come from @acme/ds, never hand-rolled button elements.",
+        ],
+    );
+    let out = extract(dir);
+    assert!(
+        out.contains("0 proposals") && out.contains("1 duplicates"),
+        "{out}"
+    );
+}
+
+#[test]
+fn hooks_fail_open_outside_a_repo() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = run(
+        tmp.path(),
+        &["hook", "pre-tool-use"],
+        "{\"tool_input\":{\"file_path\":\"/x.ts\"}}",
+    );
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn review_regressions_symlinks_outside_edits_and_ledger_tampering() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &[
+            "add",
+            "No axios in src.",
+            "--scope",
+            "src/**",
+            "--forbid-import",
+            "axios",
+        ],
+    );
+    git(dir, &["commit", "-qm", "decisions"]);
+
+    // The temp dir is behind a symlink on macOS (/var → /private/var); a new file in a new
+    // directory must still be checked.
+    let new_file = dir.join("src/newdir/c.ts");
+    let write = json!({"session_id": "s", "cwd": dir, "tool_name": "Write",
+        "tool_input": {"file_path": new_file, "content": "import axios from 'axios';\n"}});
+    assert_eq!(
+        hook(dir, "pre-tool-use", write).unwrap()["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+
+    // An edit outside the repo doesn't switch off the Stop hook.
+    let outside = json!({"session_id": "s2", "cwd": dir, "tool_name": "Write",
+        "tool_input": {"file_path": "/tmp/somewhere-else/plan.md", "content": "notes"}});
+    assert!(hook(dir, "pre-tool-use", outside).is_none());
+    let inside = json!({"session_id": "s2", "cwd": dir, "tool_name": "Write",
+        "tool_input": {"file_path": dir.join("src/d.ts"), "content": "export const d = 1;\n"}});
+    hook(dir, "pre-tool-use", inside);
+    std::fs::write(dir.join("src/d.ts"), "import axios from 'axios';\n").unwrap();
+    assert_eq!(
+        hook(dir, "stop", json!({"session_id": "s2", "cwd": dir})).unwrap()["decision"],
+        "block"
+    );
+
+    // Agents can't edit accepted records.
+    let tamper = json!({"session_id": "s", "cwd": dir, "tool_name": "Edit",
+        "tool_input": {"file_path": dir.join("decisions/D-0001.yml"), "old_string": "status: accepted", "new_string": "status: superseded"}});
+    assert_eq!(
+        hook(dir, "pre-tool-use", tamper).unwrap()["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+
+    // CI: a branch that retires the decision and breaks it in the same diff still fails,
+    // because it's judged by the base revision's ledger.
+    std::fs::remove_file(dir.join("src/d.ts")).unwrap();
+    git(dir, &["checkout", "-q", "-b", "sneaky"]);
+    let record = std::fs::read_to_string(dir.join("decisions/D-0001.yml"))
+        .unwrap()
+        .replace("status: accepted", "status: superseded");
+    std::fs::write(dir.join("decisions/D-0001.yml"), record).unwrap();
+    std::fs::write(dir.join("src/e.ts"), "import axios from 'axios';\n").unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "retire and break"]);
+    let out = run(dir, &["check", "--diff", "main...HEAD"], "");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout)
+            .contains("note: this change edits decisions/D-0001.yml")
+    );
+}

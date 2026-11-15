@@ -2,14 +2,17 @@
 
 use anyhow::{Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use ingrain_core::{Config, Git, Layout, RuleFile, rulefile};
+use ingrain_core::{Config, DiffBase, Git, Layout, RuleFile, rulefile};
 use ingrain_engine::CompiledRule;
-use std::path::Path;
+use ingrain_ledger::Ledger;
+use std::path::{Path, PathBuf};
 
 pub struct Repo {
     pub git: Git,
     pub layout: Layout,
     pub config: Config,
+    /// The decision ledger in `decisions/`.
+    pub ledger: Ledger,
     ignore: GlobSet,
 }
 
@@ -23,10 +26,12 @@ impl Repo {
             globs.add(Glob::new(pattern).with_context(|| format!("bad ignore glob `{pattern}`"))?);
         }
         let ignore = globs.build()?;
+        let ledger = Ledger::new(git.root());
         Ok(Self {
             git,
             layout,
             config,
+            ledger,
             ignore,
         })
     }
@@ -65,5 +70,41 @@ impl Repo {
     pub fn find_accepted(&self, id: &str) -> Result<RuleFile> {
         let path = self.layout.rule_path(&self.layout.rules_dir(), id)?;
         RuleFile::load(&path).with_context(|| format!("no accepted rule `{id}`"))
+    }
+
+    /// Local state shared by rules and decisions: `.git/ingrain/`.
+    pub fn state_dir(&self) -> PathBuf {
+        self.layout.data.clone()
+    }
+
+    /// A working-tree file, if it exists.
+    pub fn read(&self, rel: &str) -> Option<String> {
+        std::fs::read_to_string(self.git.root().join(rel)).ok()
+    }
+
+    /// The same files as decision-check targets. Manifests also get their content before the
+    /// change, so a check sees which dependencies were added.
+    pub fn decision_targets(
+        &self,
+        targets: &[crate::check::Target],
+        base: &DiffBase,
+    ) -> Vec<ingrain_ledger::Target> {
+        let before_rev = base.before_rev(&self.git);
+        targets
+            .iter()
+            .filter(|t| !t.path.starts_with("decisions/"))
+            .map(|t| ingrain_ledger::Target {
+                path: t.path.clone(),
+                content: t.content.clone(),
+                added: Some(t.added.clone()),
+                before: if ingrain_ledger::manifest::is_manifest(&t.path) {
+                    before_rev
+                        .as_deref()
+                        .and_then(|rev| self.git.show(rev, &t.path))
+                } else {
+                    None
+                },
+            })
+            .collect()
     }
 }

@@ -1,12 +1,12 @@
 name: ingrain check
-description: Fail pull requests that add code breaking rules learned from past corrections of agent code.
+description: Fail pull requests whose added lines break recorded decisions or rules learned from corrections of agent code.
 inputs:
   base:
     description: Revision to diff against. Defaults to the pull request base.
     default: ${{ github.event.pull_request.base.sha }}
   version:
     description: Release of WispAgents/ingrain to use.
-    default: v0.1.0
+    default: v0.2.0
 runs:
   using: composite
   steps:

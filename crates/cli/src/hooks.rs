@@ -4,10 +4,23 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::path::Path;
 
-// `.claude/settings.json` is shared with the team: teammates without ingrain get a no-op.
-const POST_EDIT: &str =
-    "command -v ingrain >/dev/null 2>&1 && ingrain check --hook post-edit || true";
-const STOP: &str = "command -v ingrain >/dev/null 2>&1 && ingrain check --hook stop || true";
+/// `.claude/settings.json` is shared with the team: teammates without ingrain get a no-op.
+fn guarded(event: &str) -> String {
+    format!("command -v ingrain >/dev/null 2>&1 && ingrain hook {event} || true")
+}
+
+/// The Claude Code hook events ingrain answers, with their tool matcher.
+const EVENTS: &[(&str, Option<&str>, &str)] = &[
+    ("SessionStart", None, "session-start"),
+    ("PreToolUse", Some("Edit|Write|MultiEdit"), "pre-tool-use"),
+    ("PostToolUse", Some("Edit|Write|MultiEdit"), "post-tool-use"),
+    ("Stop", None, "stop"),
+];
+
+/// Hook commands from v0.1 ingrain and the separate decision-ledger tool, replaced on install.
+fn is_legacy(command: &str) -> bool {
+    command.contains("ingrain check --hook") || command.contains("decisions hook")
+}
 const PRE_COMMIT_MARKER: &str = "# ingrain";
 
 /// What an install step did.
@@ -19,7 +32,7 @@ pub enum Outcome {
     Skipped(String),
 }
 
-/// Merge the PostToolUse and Stop hooks into `.claude/settings.json`, keeping everything else.
+/// Merge ingrain's hooks into `.claude/settings.json`, keeping everything else.
 pub fn install_claude(root: &Path) -> Result<Outcome> {
     let path = root.join(".claude").join("settings.json");
     let mut settings: Value = if path.exists() {
@@ -36,20 +49,37 @@ pub fn install_claude(root: &Path) -> Result<Outcome> {
         )));
     };
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
-    let mut changed = false;
-    changed |= add_hook(
-        hooks,
-        "PostToolUse",
-        Some("Edit|Write|MultiEdit"),
-        POST_EDIT,
-    )?;
-    changed |= add_hook(hooks, "Stop", None, STOP)?;
+    let mut changed = remove_legacy(hooks)?;
+    for (event, matcher, name) in EVENTS {
+        changed |= add_hook(hooks, event, *matcher, &guarded(name))?;
+    }
     if !changed {
         return Ok(Outcome::AlreadyPresent);
     }
     std::fs::create_dir_all(path.parent().expect("has parent"))?;
     std::fs::write(&path, serde_json::to_string_pretty(&settings)? + "\n")?;
     Ok(Outcome::Installed)
+}
+
+/// Drop hook groups that only run legacy commands; keep everything else.
+fn remove_legacy(hooks: &mut Value) -> Result<bool> {
+    let Some(events) = hooks.as_object_mut() else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    for list in events.values_mut().filter_map(Value::as_array_mut) {
+        for group in list.iter_mut() {
+            if let Some(hs) = group["hooks"].as_array_mut() {
+                let before = hs.len();
+                hs.retain(|h| !h["command"].as_str().is_some_and(is_legacy));
+                changed |= hs.len() != before;
+            }
+        }
+        let before = list.len();
+        list.retain(|g| g["hooks"].as_array().is_none_or(|hs| !hs.is_empty()));
+        changed |= list.len() != before;
+    }
+    Ok(changed)
 }
 
 fn add_hook(hooks: &mut Value, event: &str, matcher: Option<&str>, command: &str) -> Result<bool> {
@@ -130,6 +160,29 @@ mod tests {
             v["hooks"]["PostToolUse"][0]["matcher"],
             "Edit|Write|MultiEdit"
         );
+    }
+
+    #[test]
+    fn replaces_legacy_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings,
+            r#"{"hooks":{"PostToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"command -v ingrain >/dev/null 2>&1 && ingrain check --hook post-edit || true"}]}],
+               "PreToolUse":[{"hooks":[{"type":"command","command":"command -v decisions >/dev/null 2>&1 && decisions hook pre-tool-use || true"}]}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(install_claude(dir.path()).unwrap(), Outcome::Installed);
+        let text = std::fs::read_to_string(&settings).unwrap();
+        assert!(
+            !text.contains("check --hook") && !text.contains("decisions hook"),
+            "{text}"
+        );
+        let v: Value = serde_json::from_str(&text).unwrap();
+        for event in ["SessionStart", "PreToolUse", "PostToolUse", "Stop"] {
+            assert_eq!(v["hooks"][event].as_array().unwrap().len(), 1, "{event}");
+        }
     }
 
     #[test]

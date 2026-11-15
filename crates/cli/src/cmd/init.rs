@@ -30,6 +30,15 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         )?;
     }
     println!("created {}", l.corrections_dir().display());
+    std::fs::create_dir_all(repo.ledger.pending_dir())?;
+    let ledger_ignore = repo.ledger.dir.join(".gitignore");
+    if !ledger_ignore.exists() {
+        std::fs::write(
+            &ledger_ignore,
+            "# Proposed decisions stay local until a person accepts them.\npending/\n",
+        )?;
+    }
+    println!("created {}", repo.ledger.dir.display());
 
     if !args.no_claude {
         report(
@@ -44,7 +53,9 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         );
     }
     println!(
-        "\nnext: `ingrain mine` to capture corrections, then `ingrain propose` and `ingrain review`"
+        "
+next: `ingrain decisions add \"...\"` to record a decision, `ingrain decisions extract --doc AGENTS.md`
+      to propose some, or `ingrain mine` then `ingrain propose` to learn rules from your corrections"
     );
     Ok(ExitCode::SUCCESS)
 }

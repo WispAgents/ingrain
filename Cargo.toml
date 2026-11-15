@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/engine", "crates/learn", "crates/cli"]
+members = ["crates/core", "crates/engine", "crates/learn", "crates/ledger", "crates/cli"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/WispAgents/ingrain"
@@ -25,6 +25,7 @@ tempfile = "3"
 ingrain-core = { path = "crates/core" }
 ingrain-engine = { path = "crates/engine" }
 ingrain-learn = { path = "crates/learn" }
+ingrain-ledger = { path = "crates/ledger" }
 
 [profile.release]
 lto = "thin"

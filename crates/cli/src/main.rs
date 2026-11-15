@@ -1,10 +1,12 @@
-//! `ingrain`: learn lint rules from the corrections humans make to coding-agent
-//! output, and enforce them where the agent edits, before commit and in CI.
+//! `ingrain`: keep coding agents in line with what your team decided. Decisions you record and
+//! lint rules learned from your corrections are shown and enforced where the agent edits,
+//! before commit and in CI.
 
 mod check;
 mod cmd;
 mod hitlog;
 mod hooks;
+mod overrides;
 mod repo;
 mod session;
 
@@ -23,9 +25,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create .corrections/ and install the Claude Code and git hooks.
+    /// Create .corrections/ and decisions/, and install the Claude Code and git hooks.
     Init(cmd::init::Args),
-    /// Capture corrections from git history, PR review suggestions and agent transcripts.
+    /// Learned rules: capture corrections from git history, PR review suggestions and agent transcripts.
     Mine(cmd::mine::Args),
     /// Cluster corrections and write backtested rule proposals to .corrections/pending/.
     Propose(cmd::propose::Args),
@@ -54,8 +56,15 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
-    /// Check added lines against accepted rules (hooks, pre-commit, CI).
+    /// Check added lines against learned rules and decisions (pre-commit, CI).
     Check(cmd::check::Args),
+    /// The decision ledger: record, extract, review, supersede and list decisions.
+    Decisions {
+        #[command(subcommand)]
+        command: cmd::decisions::Command,
+    },
+    /// Claude Code hook entry point (reads the hook JSON on stdin).
+    Hook { event: cmd::hook::Event },
     /// Time-split evaluation: learn from older corrections, score on newer ones.
     Eval(cmd::eval::Args),
 }
@@ -74,6 +83,8 @@ fn main() -> ExitCode {
         Command::Mode { id, mode } => cmd::rules::set_mode(&dir, &id, mode),
         Command::Promote { apply } => cmd::rules::promote(&dir, apply),
         Command::Check(args) => cmd::check::run(&dir, args),
+        Command::Decisions { command } => cmd::decisions::run(&dir, command),
+        Command::Hook { event } => cmd::hook::run(&dir, event),
         Command::Eval(args) => cmd::eval::run(&dir, args),
     };
     match result {

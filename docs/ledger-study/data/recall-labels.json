@@ -1,0 +1,79 @@
+[
+ {
+  "key": "anthropics_claude-agent-sdk-python:98a0ecbd6c8c",
+  "match": true,
+  "record": 0,
+  "scope_covers": true,
+  "why": "Same rule; scope explicitly lists types.py."
+ },
+ {
+  "key": "anthropics_claude-agent-sdk-python:1a02c6699272",
+  "match": true,
+  "record": 0,
+  "scope_covers": false,
+  "why": "Same rule, but scope is types.py only, not __init__.py."
+ },
+ {
+  "key": "anthropics_claude-agent-sdk-python:8d616c7963ca",
+  "match": true,
+  "record": 0,
+  "scope_covers": true,
+  "why": "Same rule and reason; scope lists types.py."
+ },
+ {
+  "key": "anthropics_claude-agent-sdk-python:3919f91a2aab",
+  "match": true,
+  "record": 0,
+  "scope_covers": false,
+  "why": "Same rule; scope limited to types.py, excludes __init__.py."
+ },
+ {
+  "key": "anthropics_claude-agent-sdk-python:3b7f517e2219",
+  "match": true,
+  "record": 0,
+  "scope_covers": false,
+  "why": "Same rule; scope doesn't include __init__.py exports."
+ },
+ {
+  "key": "anthropics_claude-agent-sdk-python:5844f1c3fb81",
+  "match": true,
+  "record": 0,
+  "scope_covers": false,
+  "why": "Same rule; scope is types.py, not __init__.py."
+ },
+ {
+  "key": "anthropics_claude-agent-sdk-python:834394ec657d",
+  "match": true,
+  "record": 0,
+  "scope_covers": true,
+  "why": "Exact rule on HookEvent in types.py."
+ },
+ {
+  "key": "simonw_datasette:b20aa06be21d",
+  "match": true,
+  "record": 1,
+  "scope_covers": true,
+  "why": "Double-quote escaping in escape_sqlite; scope lists the file."
+ },
+ {
+  "key": "getsentry_sentry-javascript:bbd188a32abe",
+  "match": true,
+  "record": 0,
+  "scope_covers": true,
+  "why": "Option only for Cloudflare; transformOptimizedDeps symbol covers test."
+ },
+ {
+  "key": "getsentry_sentry-javascript:7cc2ff69d9f4",
+  "match": true,
+  "record": 0,
+  "scope_covers": true,
+  "why": "Avoid getClient when client available; scope is global."
+ },
+ {
+  "key": "getsentry_sentry-javascript:dda2909d6322",
+  "match": true,
+  "record": 0,
+  "scope_covers": true,
+  "why": "Same constant rule; GEN_AI_CONVERSATION_ID symbol scope plausibly covers test."
+ }
+]

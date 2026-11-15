@@ -113,3 +113,34 @@ electric (Claude, TS), anthropics/claude-agent-sdk-python (Claude, Py), simonw/d
 - Hook latency ~40 ms/edit on a 3k-line file (2 git spawns). Scan p95 < 1 ms per hunk. Latency bar met.
 - Verdict: stop "learn rules from git history". Open signal: in-session transcript corrections (private data).
   Details: docs/validation.md.
+
+---
+
+# v0.2: decisions merged into ingrain
+
+decision-ledger (WispAgents/decision-ledger) is folded into ingrain: one binary, one set of hooks,
+one check, one Action. The decision-ledger repo is removed after wisp moves over.
+
+## Decisions
+- New crate `crates/ledger` (`ingrain-ledger`): decision records, scope, decision checks, manifests,
+  extraction, agent messages. Reuses `ingrain-core` (git, diff) and `ingrain-engine` (ast-grep).
+- `ingrain-core::git` takes the ledger's improved version (relative_in_repo, before_rev, -w, end-of-options).
+- CLI: `ingrain decisions <add|extract|review|accept|reject|supersede|list|show|for|stale>`.
+- One hook entry point: `ingrain hook <session-start|pre-tool-use|post-tool-use|stop>`.
+  session-start: repo-wide decisions. pre-tool-use: deny edits breaking decision checks, else scoped
+  decisions once per session. post-tool-use: learned rules (old post-edit). stop: both, edited files only.
+- `ingrain check` runs learned rules and decision checks together (pre-commit, CI, Action).
+- One session state file (shown, edited, stop attempts).
+- Study moves to docs/ledger-study/.
+
+## Steps
+- [x] 1. core git superset
+- [x] 2. ledger crate
+- [x] 3. CLI: decisions commands, unified hook, unified check, install
+- [x] 4. Tests ported, all green, clippy
+- [x] 5. README/docs, Action
+- [ ] 6. Release v0.2.0, tap (ingrain updated, decision-ledger formula removed)
+- [ ] 7. wisp: ingrain only (settings, CI, docs, local checkout)
+- [ ] 8. Remove decision-ledger repo (after confirmation)
+
+- 2026-11-16: merged; 80 tests green, clippy clean; live Claude Code check: SessionStart context + PreToolUse deny work with `ingrain hook`.

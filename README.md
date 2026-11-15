@@ -1,26 +1,22 @@
 # ingrain
 
-Ingrain learns lint rules from the corrections humans make to coding-agent output,
-then enforces them where the agent edits, before commit, and in CI.
+**Problem:** your coding agent keeps breaking what your team already settled. It re-adds the
+dependency you removed, brings back the pattern you banned, and repeats the mistake you corrected
+last week.
 
-Agents repeat the same mistakes across sessions. Writing the fix into `CLAUDE.md` is prose the
-agent can ignore. Ingrain turns the corrections you already made into **deterministic
-[ast-grep](https://ast-grep.github.io) rules**, tests them on your history, and gives them to the
-agent at edit time, together with the fix a human applied last time.
+**Solution:** ingrain keeps those rules in your repo, puts the relevant ones in front of the agent
+right before it edits a file, and blocks edits, commits and PRs that break them.
 
-```
-corrections ──► clusters ──► candidate rules ──► backtest ──► you review ──► shadow → warn → block
-(git fix-ups,    (what was     (templates,         (history,      (ingrain       (hook, pre-commit, CI)
- PR suggestions,  removed)      LLM fallback)       agent code)    review)
- transcripts)
-```
+Rules come from two places:
 
-> **Status: v0.1, experimental. Validation failed on public history.** Over 17 public repos
-> (7,443 corrections), rules learned from older corrections prevented 0.46% of later ones at 0.6%
-> precision. With the default evidence gate, no rules are proposed at all. Hand-labeling found only
-> 10.6% of corrections are rule-shaped. Read [docs/validation.md](docs/validation.md) first. The
-> enforcement side (hooks, pre-commit, CI, about 40 ms per edit) works and is tested, and runs
-> hand-written ast-grep rules just as well.
+- **Decisions** you record (or that `ingrain decisions extract` proposes from your AGENTS.md, PRs,
+  reviews, commits and sessions): "billing calls the payments client, never raw fetch", with a
+  reason, a scope and optional checks. They live in `decisions/`.
+- **Lint rules learned from your corrections**: when you keep fixing the same thing in agent code,
+  `ingrain mine` and `ingrain propose` turn it into an ast-grep rule, tested on your history. They
+  live in `.corrections/rules/`.
+
+Nothing becomes a rule without a person accepting it.
 
 ## Install
 
@@ -28,132 +24,165 @@ corrections ──► clusters ──► candidate rules ──► backtest ─�
 brew install wispagents/tap/ingrain
 # or a prebuilt binary from https://github.com/WispAgents/ingrain/releases
 # or from source:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.1.0 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.0 ingrain
 ```
 
-Needs `git`. `gh` (logged in) for PR review suggestions. Optional: Claude Code (`claude`) or
-`ANTHROPIC_API_KEY` for rules that templates can't express.
+Needs `git`. Optional: `gh` (logged in) to read GitHub PRs, reviews and issues; Claude Code
+(`claude`) or `ANTHROPIC_API_KEY` for extraction and for rules templates can't express.
 
 ## Quick start
 
 ```sh
 cd your-repo
-ingrain init                 # .corrections/, Claude Code hooks, git pre-commit hook
-ingrain mine --pr-refs --github   # capture corrections
-ingrain propose --explain    # cluster, write and backtest rules → .corrections/pending/
-ingrain review               # accept / edit / reject, one card per rule
-git commit .corrections/rules -m "ingrain rules"
+ingrain init      # decisions/, .corrections/, Claude Code hooks, git pre-commit hook
+
+ingrain decisions add "Billing code calls the payments client, never raw fetch." \
+  --reason "the client adds idempotency keys" \
+  --scope "src/billing/**" \
+  --forbid-pattern 'TypeScript:fetch($$$A)'
+
+ingrain decisions extract --doc AGENTS.md   # propose decisions from your rules doc, PRs, commits, sessions
+ingrain decisions review                    # accept / edit / reject
+
+ingrain mine --pr-refs --github             # capture corrections of agent code
+ingrain propose --explain                   # learn and backtest lint rules from them
+ingrain review                              # accept / edit / reject
+
+git commit decisions/ .corrections/ -m "ingrain rules"
 ```
 
-Accepted rules start in **shadow** mode (logged only). Promote them when they prove themselves:
+## What the agent sees (Claude Code)
 
-```sh
-ingrain rules                # modes and hit counts
-ingrain promote              # suggestions from the hit log; --apply to write them
-ingrain mode avoid-fetch-call block
-```
+`ingrain init` adds one hook command per event to `.claude/settings.json` (`ingrain hook <event>`).
+Each is a no-op for teammates who don't have ingrain installed, and all of them fail open.
 
-## Where corrections come from
+| Hook | What happens |
+|---|---|
+| `SessionStart` | Repo-wide decisions go into the session, plus how to propose a new one |
+| `PreToolUse` on Edit / Write / MultiEdit | The edit is simulated first. If an added line breaks a decision's check, the edit is **denied** with the decision and the way out. Otherwise the decisions scoped to that file are shown, each once per session |
+| `PostToolUse` on Edit / Write / MultiEdit | Learned rules run on the edited file. Warn: a note to the agent. Block: the agent must fix it, with the past human fix shown |
+| `Stop` | Rules and decisions are re-checked on the files this session edited. Something broken sends the turn back, up to `stop_max_attempts` times |
 
-| Source | Signal | Command |
-|---|---|---|
-| Git fix-ups | A human commit rewrites lines an agent commit added (found with `git blame`) within `window_days` | `ingrain mine` |
-| PR refs | Same, on `refs/pull/*/head`, so fix-ups inside PRs survive squash merges | `ingrain mine --pr-refs` |
-| Review suggestions | A ```` ```suggestion ```` comment on agent-written lines: an exact before/after | `ingrain mine --github [owner/name]` |
-| Claude Code transcripts | The agent edits, you reply, the agent rewrites what it just wrote | read from `~/.claude/projects` by default |
+Agents can't edit accepted decisions or rules; they propose with `ingrain decisions add --propose`
+or `ingrain decisions supersede`, and a person accepts.
 
-Agent commits are recognized by trailers and authors (`Co-Authored-By: Claude`, `Generated with
-Claude Code`, Codex, Cursor, Copilot agent, Devin, Jules, OpenHands…). Add your own markers in
-`.corrections/config.yml`. Formatter runs and large refactors are skipped.
-
-## How rules are learned
-
-1. **Cluster.** Each correction is reduced to the salient tokens it *removed* (identifiers,
-   keywords, `==`). Corrections sharing a removed token form a cluster. Support counts distinct
-   fix events (commits, review comments), not hunks.
-2. **Write.** Templates first: banned call (`fetch($$$ARGS)`, `console.log($$$ARGS)`,
-   `$OBJ.x($$$ARGS)`) or banned identifier by node kind. Clusters templates can't express go to an
-   LLM (`claude -p` or the Anthropic API, `claude-opus-5-5`), with backtest feedback, up to 3 tries.
-3. **Backtest.** A rule is proposed only if it:
-   - flags the agent's lines in at least `min_support` distinct fixes,
-   - flags at most 10% of the corrected versions,
-   - has precision ≥ `min_precision` (lower bound of the 90% Wilson interval) on agent code
-     written after the rule became learnable, or on all earlier agent code if it fired fewer than
-     5 times there.
-     A hit on lines a human later corrected, for the reason the rule targets, is a true positive.
-     A hit on agent lines humans kept is a false alarm. A rule with no evidence is not proposed.
-4. **Review.** You decide. Rejected rules are remembered with their reason and never re-proposed,
-   under any id.
-
-`ingrain propose --explain` prints every cluster and why each candidate was accepted or rejected.
+Tested live with Claude Code 2.1.322: asked to write raw `fetch` in `src/billing/`, the write was
+denied before the file changed, and the agent explained the decision instead of working around it.
 
 ## Where checks run
 
-All paths run the same rules and only look at **added lines**, so existing code never blocks.
+`ingrain check` runs learned rules and decision checks together, on **added lines only**, so
+existing code never blocks.
 
-| Path | Command | What happens on a hit |
+| Path | Command | On a hit |
 |---|---|---|
-| After each agent edit | `ingrain check --hook post-edit` (Claude Code `PostToolUse`) | warn: note to the agent; block: the agent must fix it, with the past human fix shown |
-| End of the agent's turn | `ingrain check --hook stop` (Claude Code `Stop`) | block: the turn is sent back, up to `stop_max_attempts` times |
-| Commit | `ingrain check --staged` (`.git/hooks/pre-commit`) | block: the commit fails |
-| Pull request | `ingrain check --diff base...HEAD --format github` ([action](action/action.yml)) | annotations; block fails the check |
+| Commit | `ingrain check --staged` (`.git/hooks/pre-commit`) | the commit fails |
+| Pull request | `ingrain check --diff base...HEAD --format github` ([action](action/action.yml)) | annotations; failing check |
+| By hand | `ingrain check [paths]` | listed; exit 1 if something blocks |
 
-Hooks fail open: if ingrain itself errors, the agent's session continues. The pre-commit hook is a
-no-op for teammates who don't have ingrain installed.
+Pre-commit and CI judge a change by the decisions it started from, so a branch can't retire a
+decision and break it in the same diff. CI also flags any change to the ledger.
 
-To keep code a rule flags, add a comment with a reason on the line or the line above:
+To keep a line on purpose, add a comment with a reason, on the line or the line above:
 
 ```ts
 // ingrain-ignore avoid-fetch-call: this endpoint streams the response body
+// decisions-ignore D-0001: webhook replay needs raw fetch
 const res = await fetch(url);
 ```
 
-An ignore comment without a reason doesn't count. Overrides are logged; a rule overridden too often
-is suggested for demotion.
+Without a reason it doesn't count. Overrides are logged; `ingrain promote` and
+`ingrain decisions stale` flag rules and decisions that are overridden often.
 
-## Rule files
+## Decisions
 
-Plain ast-grep YAML, so they also run with `ast-grep scan`:
+One YAML file per decision, `decisions/D-0001.yml`, reviewed like code:
 
 ```yaml
-id: avoid-fetch-call
-language: TypeScript
-severity: warning
-rule:
-  pattern: fetch($$$ARGS)
-message: "Avoid `fetch(...)` here: in 4 past corrections humans replaced it with `apiClient` / `get`."
-metadata:
-  ingrain:
-    mode: shadow
-    support: 4
-    origin: template
-    evidence: ["commit 3f2c1a9e10 src/feature0.ts: use apiClient in load0", "..."]
-    backtest: { before_hits: 4, befores: 4, after_hits: 0, afters: 4, kept_hits: 0, kept: 12, head_hits: 0 }
-    example: { before: "const res = await fetch(`/api/items/${id}`);", after: "const res = await apiClient.get(`/items/${id}`);" }
+id: D-0001
+decision: Billing code calls the payments client, never raw fetch.
+reason: the client adds idempotency keys
+rejected:
+- a shared fetch wrapper per module
+scope:
+- src/billing/**          # path globs, or symbol / module names like `apiClient`
+category: convention      # convention | constraint | api_change | architecture | scope
+status: accepted          # accepted | superseded (proposals live in decisions/pending/)
+checks:                   # optional; without checks a decision is shown, not enforced
+  forbid_imports: [axios]
+  forbid_deps: [redis]    # package.json, pyproject.toml, requirements*.txt, Cargo.toml, go.mod
+  forbid_patterns:
+  - language: TypeScript
+    pattern: fetch($$$A)  # ast-grep pattern
+sources:
+- https://github.com/acme/app/pull/214
+```
+
+A glob scope matches the path; a bare directory means everything under it. A symbol matches files
+whose path names it or whose content mentions it. No scope, or `**`, is repo-wide.
+
+To change one: `ingrain decisions supersede D-0002 --decision "..." --reason "..."`, then
+`ingrain decisions review`. The old decision stays in force until a person accepts the new one.
+
+`ingrain decisions extract` reads texts it hasn't read before, oldest first, 400 per run: your
+`--doc` files (AGENTS.md, CONTRIBUTING.md), commit messages, GitHub PRs, reviews, issues and
+comments by the repo's owners, members and collaborators, and what you typed in Claude Code
+sessions for this repo. A model returns proposals; near-duplicates of existing, pending or rejected
+decisions are dropped. Measured on public repos, 82% of extracted records were real, durable
+decisions ([docs/ledger-study](docs/ledger-study/report.md)).
+
+## Learned rules
+
+| Source | Signal |
+|---|---|
+| Git fix-ups (`ingrain mine`) | A human commit rewrites lines an agent commit added, within `window_days` |
+| PR refs (`--pr-refs`) | Same, on `refs/pull/*/head`, so fix-ups inside PRs survive squash merges |
+| Review suggestions (`--github`) | A ```` ```suggestion ```` comment on agent-written lines |
+| Claude Code transcripts | The agent edits, you reply, the agent rewrites what it just wrote |
+
+`ingrain propose` clusters corrections by what they removed, writes rules (templates first, then a
+model), and keeps a rule only if it catches the past mistakes, spares the fixed versions, and is
+precise on agent code humans kept. Accepted rules start in shadow mode; `ingrain promote` moves them
+to warn and block from their hit log. `ingrain eval` measures the whole loop on your history.
+
+Expect few rules at first: on 17 public repos, most human fixes of agent code were one-off bug fixes
+and taste, not repeated mistakes ([docs/validation.md](docs/validation.md)). Decisions you record
+are the main lever; learned rules catch what repeats.
+
+## Commands
+
+| | |
+|---|---|
+| `init` | Create `decisions/` and `.corrections/`, install hooks |
+| `check [paths] [--staged \| --diff RANGE] [--format text\|json\|github]` | Rules and decisions on added lines |
+| `decisions add \| extract \| review \| accept \| reject \| supersede \| list \| show \| for \| stale` | The decision ledger |
+| `mine`, `propose [--explain]`, `review`, `accept`, `reject`, `rules`, `mode`, `promote`, `eval` | Learned rules |
+| `hook <session-start\|pre-tool-use\|post-tool-use\|stop>` | Claude Code hook entry point |
+
+## CI
+
+```yaml
+# .github/workflows/ingrain.yml
+on: pull_request
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: WispAgents/ingrain/action@v0.2.0
 ```
 
 ## Layout
 
 ```
-.corrections/            committed
-  config.yml
-  rules/<id>.yml         accepted rules
-  pending/<id>.yml       proposals (gitignored)
-  rejected.yml           rejected proposals and reasons
-.git/ingrain/            local only
-  corrections.jsonl  agent_hunks.jsonl  hits.jsonl
+decisions/D-NNNN.yml       accepted decisions          committed
+decisions/pending/         proposed decisions          gitignored
+.corrections/rules/        accepted learned rules      committed
+.corrections/pending/      proposed rules              gitignored
+.corrections/config.yml    thresholds, agent markers   committed
+.git/ingrain/              corrections, hit logs, hook sessions, extraction state (local)
 ```
-
-## Evaluate on your own history
-
-```sh
-ingrain mine --pr-refs --github
-ingrain eval --split 0.6 --json report.json
-```
-
-`eval` learns rules only from the oldest 60% of corrections, freezes them, and reports how many of
-the later corrections they would have prevented and their precision on later agent code.
-[`scripts/validate.sh`](scripts/validate.sh) runs this over a list of public repositories.
 
 ## Development
 
@@ -162,8 +191,8 @@ cargo test --all
 cargo clippy --all-targets -- -D warnings
 ```
 
-Crates: `core` (data model, rule files, git), `engine` (ast-grep wrapper), `learn` (capture,
-cluster, synth, backtest, eval), `cli` (the `ingrain` binary). [PLAN.md](PLAN.md) is the working
-plan.
+Crates: `core` (data model, rule files, git), `engine` (ast-grep), `learn` (capture, cluster, rule
+writing, backtest, eval), `ledger` (decisions, scope, checks, extraction), `cli` (the `ingrain`
+binary). [PLAN.md](PLAN.md) is the working plan.
 
 License: Apache-2.0.
