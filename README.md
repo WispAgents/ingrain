@@ -44,8 +44,9 @@ npx skills add WispAgents/ingrain
 | `ingrain-decide` | "From now on we don't use X": record, change or look up a decision |
 | `ingrain-rules` | Learn rules from past corrections, review them, set shadow / warn / block |
 
-The plugin's hooks do nothing until the `ingrain` binary is installed, or when the repo's own
-`.claude/settings.json` already runs ingrain (no double checks). Agents without hooks get an
+The plugin's hooks act only in repos set up with `ingrain init`, and step aside where the repo's
+own `.claude/settings.json` already runs ingrain (no double checks). Without the `ingrain` binary
+they do nothing. Agents without hooks get an
 ingrain section in AGENTS.md (`ingrain init --agents-md`) and are caught by pre-commit and CI.
 
 ## Install

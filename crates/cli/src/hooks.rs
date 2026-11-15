@@ -41,6 +41,21 @@ fn is_legacy(command: &str) -> bool {
     })
 }
 
+/// True when Claude Code settings run an ingrain hook, current (`ingrain hook …`) or legacy.
+pub fn runs_ingrain(settings: &Value) -> bool {
+    let Some(events) = settings["hooks"].as_object() else {
+        return false;
+    };
+    events
+        .values()
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|group| group["hooks"].as_array())
+        .flatten()
+        .filter_map(|h| h["command"].as_str())
+        .any(|c| c.contains("ingrain hook ") || is_legacy(c))
+}
+
 const PRE_COMMIT_MARKER: &str = "# ingrain";
 
 /// What an install step did.

@@ -38,8 +38,8 @@ pub fn run(dir: &Path, event: Event, from_plugin: bool) -> Outcome {
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
     let payload: Value = serde_json::from_str(&input).unwrap_or(json!({}));
-    let result = if from_plugin && repo_runs_ingrain(dir, &payload) {
-        Ok(None) // the repo's own hooks answer; don't run twice
+    let result = if from_plugin && plugin_steps_aside(dir, &payload) {
+        Ok(None)
     } else {
         handle(dir, event, &payload)
     };
@@ -51,15 +51,31 @@ pub fn run(dir: &Path, event: Event, from_plugin: bool) -> Outcome {
     Ok(ExitCode::SUCCESS)
 }
 
-/// True when the repository's committed or local Claude Code settings already run `ingrain hook`.
-fn repo_runs_ingrain(dir: &Path, payload: &Value) -> bool {
+/// A plugin hook (`--from-plugin`) answers only in repos set up for ingrain whose own Claude Code
+/// settings don't already run it: the plugin is installed for every repo, and must neither act in
+/// repos that never chose ingrain nor answer twice where the repo's hooks do.
+fn plugin_steps_aside(dir: &Path, payload: &Value) -> bool {
     let dir = payload["cwd"].as_str().map(Path::new).unwrap_or(dir);
-    let Ok(git) = ingrain_core::Git::open(dir) else {
-        return false;
+    let Ok(repo) = Repo::open(dir) else {
+        return true;
     };
-    ["settings.json", "settings.local.json"].iter().any(|f| {
-        std::fs::read_to_string(git.root().join(".claude").join(f))
-            .is_ok_and(|t| t.contains("ingrain hook "))
+    let set_up = repo.layout.corrections_dir().is_dir() || !repo.ledger.live_lenient().is_empty();
+    if !set_up {
+        return true;
+    }
+    // Claude Code reads settings from the project dir it was started in, which in a monorepo
+    // can be below the git root.
+    let mut roots = vec![repo.git.root().to_path_buf()];
+    if let Some(project) = std::env::var_os("CLAUDE_PROJECT_DIR") {
+        roots.push(project.into());
+    }
+    roots.iter().any(|root| {
+        ["settings.json", "settings.local.json"].iter().any(|f| {
+            std::fs::read_to_string(root.join(".claude").join(f))
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .is_some_and(|settings| crate::hooks::runs_ingrain(&settings))
+        })
     })
 }
 

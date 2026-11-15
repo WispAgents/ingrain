@@ -24,18 +24,23 @@ pub fn block() -> String {
     format!("{START}\n{BODY}{END}\n")
 }
 
-/// Insert or refresh the block in `path`. Returns true if the file changed.
+/// Insert or refresh the block in `path`. Returns true if the file changed. A start marker
+/// without an end marker after it is refused, so text after it is never swallowed.
 pub fn write(path: &Path) -> Result<bool> {
     let current = std::fs::read_to_string(path).unwrap_or_default();
-    let next = match (current.find(START), current.find(END)) {
-        (Some(a), Some(b)) if a < b => format!(
-            "{}{}{}",
-            &current[..a],
-            block().trim_end(),
-            &current[b + END.len()..]
-        ),
-        _ if current.trim().is_empty() => format!("# AGENTS.md\n\n{}", block()),
-        _ => format!("{}\n\n{}", current.trim_end(), block()),
+    let next = match current.find(START) {
+        Some(a) => {
+            let Some(len) = current[a..].find(END) else {
+                anyhow::bail!(
+                    "{} has `{START}` but no `{END}` after it; fix the markers or remove the block",
+                    path.display()
+                );
+            };
+            let b = a + len + END.len();
+            format!("{}{}{}", &current[..a], block().trim_end(), &current[b..])
+        }
+        None if current.trim().is_empty() => format!("# AGENTS.md\n\n{}", block()),
+        None => format!("{}\n\n{}", current.trim_end(), block()),
     };
     if next == current {
         return Ok(false);
@@ -71,5 +76,23 @@ mod tests {
         let fresh = dir.path().join("new/AGENTS.md");
         std::fs::create_dir_all(fresh.parent().unwrap()).unwrap();
         assert!(write(&fresh).unwrap());
+    }
+
+    #[test]
+    fn refuses_a_start_marker_without_an_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let text = format!("A\n{START}\nteam notes\n");
+        std::fs::write(&path, &text).unwrap();
+        assert!(write(&path).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            text,
+            "left untouched"
+        );
+        // An end marker before the start marker doesn't count either.
+        let text = format!("{END}\nA\n{START}\nteam notes\n");
+        std::fs::write(&path, &text).unwrap();
+        assert!(write(&path).is_err());
     }
 }
