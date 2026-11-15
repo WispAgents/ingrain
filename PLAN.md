@@ -80,9 +80,9 @@ Learn only from data before T; freeze rules; score after T:
 - [x] 5. cli: init, mine, propose, review (interactive + accept/reject/edit), check (hook post-edit/stop, staged, diff, github format), stats/promote
 - [x] 6. Hook install for Claude Code, git pre-commit, GitHub Action
 - [x] 7. Tests: unit + fixture repo integration tests (scripted agent commit → human fix-up)
-- [ ] 8. eval on 10–20 public repos; write `docs/validation.md` with real numbers
-- [ ] 9. Independent code review by a subagent; fix findings
-- [ ] 10. README, push to WispAgents/ingrain
+- [x] 8. eval on 10–20 public repos; write `docs/validation.md` with real numbers
+- [x] 9. Independent code review by a subagent; fix findings
+- [x] 10. README, push to WispAgents/ingrain
 
 ## Public repo candidates
 From the discovery run (last 500 commits per repo; counts are approximate):
@@ -106,3 +106,10 @@ electric (Claude, TS), anthropics/claude-agent-sdk-python (Claude, Py), simonw/d
   ~9 (5%) are repo-specific (renamed API ClaudeCodeOptions, MCP Field defaults, anyio marker, model ids).
 - Hook latency was ~270 ms under load: 5 git spawns. Cut to 2 (one rev-parse, diff first, ls-files only for new files).
 - Big repos (langfuse: 41k commits with PR refs) are slow to mine; validate.sh now caps at the newest 6000 commits and resumes.
+- Code review (Claude subagent; Codex was out of quota): 15 findings, all correctness/number-inflation ones fixed.
+- Final batch, 17 repos: 7,443 corrections, 370k agent hunks, 57 suggestion blocks in 15,909 review comments.
+  Permissive gate: 14 rules, 14/3,056 later corrections prevented (0.46%), precision 0.6%.
+  Strict gate (Wilson lower bound + required evidence, now the default): 0 rules. Stage 2 MISSED.
+- Hook latency ~40 ms/edit on a 3k-line file (2 git spawns). Scan p95 < 1 ms per hunk. Latency bar met.
+- Verdict: stop "learn rules from git history". Open signal: in-session transcript corrections (private data).
+  Details: docs/validation.md.

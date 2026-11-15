@@ -23,6 +23,21 @@ impl Score {
         let total = self.true_hits + self.false_hits;
         (total > 0).then(|| f64::from(self.true_hits) / f64::from(total))
     }
+    /// Lower bound of the 90% Wilson interval on precision: a rule with 2 of 3
+    /// hits right is not trusted like one with 200 of 300. `None` when it never fired.
+    pub fn precision_lower_bound(&self) -> Option<f64> {
+        let n = f64::from(self.true_hits + self.false_hits);
+        if n == 0.0 {
+            return None;
+        }
+        let p = f64::from(self.true_hits) / n;
+        let z = 1.645_f64;
+        let z2 = z * z;
+        let center = p + z2 / (2.0 * n);
+        let margin = z * ((p * (1.0 - p) + z2 / (4.0 * n)) / n).sqrt();
+        Some(((center - margin) / (1.0 + z2 / n)).max(0.0))
+    }
+
     pub fn after_rate(&self) -> f64 {
         let b = &self.backtest;
         if b.afters == 0 {
@@ -237,6 +252,23 @@ mod tests {
         )];
         let s = score(&rule, &[], &hunks, &all, None, 0, i64::MAX);
         assert_eq!((s.true_hits, s.false_hits), (0, 1));
+    }
+
+    #[test]
+    fn small_samples_get_a_low_bound() {
+        let few = Score {
+            true_hits: 2,
+            false_hits: 1,
+            ..Default::default()
+        };
+        let many = Score {
+            true_hits: 200,
+            false_hits: 100,
+            ..Default::default()
+        };
+        assert!(few.precision_lower_bound().unwrap() < 0.35);
+        assert!(many.precision_lower_bound().unwrap() > 0.6);
+        assert_eq!(Score::default().precision_lower_bound(), None);
     }
 
     #[test]

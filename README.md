@@ -15,9 +15,12 @@ corrections ──► clusters ──► candidate rules ──► backtest ─�
  transcripts)
 ```
 
-> **Status: v0.1, experimental.** On 17 public repositories, git history alone rarely contains
-> enough *repeated* corrections to learn rules from. See [docs/validation.md](docs/validation.md)
-> before relying on it. The enforcement side (hooks, pre-commit, CI) works and is tested.
+> **Status: v0.1, experimental. Validation failed on public history.** Over 17 public repos
+> (7,443 corrections), rules learned from older corrections prevented 0.46% of later ones at 0.6%
+> precision. With the default evidence gate, no rules are proposed at all. Hand-labeling found only
+> 10.6% of corrections are rule-shaped. Read [docs/validation.md](docs/validation.md) first. The
+> enforcement side (hooks, pre-commit, CI, about 40 ms per edit) works and is tested, and runs
+> hand-written ast-grep rules just as well.
 
 ## Install
 
@@ -71,9 +74,11 @@ Claude Code`, Codex, Cursor, Copilot agent, Devin, Jules, OpenHands…). Add you
 3. **Backtest.** A rule is proposed only if it:
    - flags the agent's lines in at least `min_support` distinct fixes,
    - flags at most 10% of the corrected versions,
-   - has precision ≥ `min_precision` on agent code written after the rule became learnable. A hit
-     on lines a human later corrected is a true positive; a hit on agent lines humans kept is a
-     false alarm.
+   - has precision ≥ `min_precision` (lower bound of the 90% Wilson interval) on agent code
+     written after the rule became learnable, or on all earlier agent code if it fired fewer than
+     5 times there.
+     A hit on lines a human later corrected, for the reason the rule targets, is a true positive.
+     A hit on agent lines humans kept is a false alarm. A rule with no evidence is not proposed.
 4. **Review.** You decide. Rejected rules are remembered with their reason and never re-proposed,
    under any id.
 

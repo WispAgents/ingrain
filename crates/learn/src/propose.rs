@@ -9,6 +9,9 @@ use ingrain_engine::CompiledRule;
 use rayon::prelude::*;
 use std::collections::HashSet;
 
+/// Hits needed inside the "after it became learnable" window to judge precision there.
+const MIN_WINDOW_HITS: u32 = 5;
+
 pub struct ProposeOptions<'a> {
     /// Distinct fix events a rule must catch.
     pub min_support: usize,
@@ -118,7 +121,7 @@ pub fn propose(
         let members: Vec<&Correction> = cl.members.iter().map(|&i| &train[i]).collect();
         let since = learnable_at(&members, opts.min_support);
         let prefilter = (origin == Origin::Template).then_some(cl.anchor.token.as_str());
-        backtest::score(
+        let windowed = backtest::score(
             rule,
             &members,
             hunks,
@@ -126,7 +129,13 @@ pub fn propose(
             prefilter,
             since,
             opts.known_before,
-        )
+        );
+        if windowed.true_hits + windowed.false_hits >= MIN_WINDOW_HITS {
+            return windowed;
+        }
+        // Too little evidence after the rule became learnable: judge it on all earlier
+        // agent code rather than trusting (or rejecting) it on a hit or two.
+        backtest::score(rule, &members, hunks, &all, prefilter, 0, opts.known_before)
     };
     let accept = |s: &Score, cl: &Cluster| -> bool {
         let caught_support = cl
@@ -139,7 +148,8 @@ pub fn propose(
             .len();
         caught_support >= opts.min_support
             && s.after_rate() <= opts.max_after_rate
-            && s.precision().is_none_or(|p| p >= opts.min_precision)
+            && s.precision_lower_bound()
+                .is_none_or(|p| p >= opts.min_precision)
     };
 
     // Templates: cheap, run in parallel.

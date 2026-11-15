@@ -14,7 +14,8 @@ pub struct Config {
     pub window_days: u32,
     /// Minimum corrections in a cluster before a rule is proposed.
     pub min_support: u32,
-    /// Minimum share of flagged agent hunks that were actually corrected.
+    /// Minimum precision on agent code (lower bound of the 90% Wilson interval):
+    /// the share of a rule's hits on agent code that humans later corrected.
     pub min_precision: f64,
     /// Path globs never mined or checked.
     pub ignore: Vec<String>,
