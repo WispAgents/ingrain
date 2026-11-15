@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/engine", "crates/learn", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/WispAgents/ingrain"
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+ast-grep-core = "0.51"
+ast-grep-config = "0.51"
+ast-grep-language = "0.51"
+sha2 = "0.10"
+clap = { version = "4", features = ["derive"] }
+rayon = "1"
+ureq = { version = "3", features = ["json"] }
+globset = "0.4"
+tempfile = "3"
+ingrain-core = { path = "crates/core" }
+ingrain-engine = { path = "crates/engine" }
+ingrain-learn = { path = "crates/learn" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

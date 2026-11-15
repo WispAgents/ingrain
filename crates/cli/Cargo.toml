@@ -1,0 +1,24 @@
+[package]
+name = "ingrain"
+description = "Learn lint rules from the corrections humans make to coding-agent output, and enforce them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ingrain"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+ingrain-core.workspace = true
+ingrain-engine.workspace = true
+ingrain-learn.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
