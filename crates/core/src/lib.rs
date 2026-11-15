@@ -5,6 +5,7 @@ pub mod diff;
 pub mod git;
 pub mod layout;
 pub mod model;
+pub mod process;
 pub mod rulefile;
 pub mod store;
 

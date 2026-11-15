@@ -12,15 +12,18 @@ committing or pushing.
 
 ## 1. Make sure the `ingrain` binary is installed
 
-Run `ingrain --version`. If it works and prints 0.2.1 or later, go to step 2.
+Run `ingrain --version`. If it works and prints 0.2.2 or later, go to step 2.
 
 Otherwise ask the user, then install it with the first option that applies:
 
-- Homebrew available (`brew --version`): `brew install wispagents/tap/ingrain`
-- Rust available (`cargo --version`): `cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.1 ingrain`
-- Otherwise download the binary for this platform from https://github.com/WispAgents/ingrain/releases/latest
-  (`ingrain-<version>-<target>.tar.gz`; targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`,
-  `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`), unpack it and put `ingrain` on the PATH.
+- macOS or Linux with Homebrew (`brew --version`): `brew install wispagents/tap/ingrain`
+- Rust available (`cargo --version`): `cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.2 ingrain`
+- Otherwise download the archive for this platform from https://github.com/WispAgents/ingrain/releases/latest
+  and put the binary on the PATH:
+  - macOS / Linux: `ingrain-<version>-<target>.tar.gz` (`aarch64-apple-darwin`, `x86_64-apple-darwin`,
+    `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`)
+  - Windows: `ingrain-<version>-x86_64-pc-windows-msvc.zip` (or `aarch64-pc-windows-msvc`); unzip
+    `ingrain.exe` into a folder on the PATH
 
 ## 2. Initialize the repo
 
@@ -78,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.2.1
+      - uses: WispAgents/ingrain/action@v0.2.2
 ```
 
 ## 5. Commit on a branch

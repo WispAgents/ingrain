@@ -9,7 +9,6 @@ use anyhow::{Context, Result, bail};
 use ingrain_core::{Correction, Git, LineRange, Snippet, Source};
 use ingrain_engine::lang;
 use serde::Deserialize;
-use std::process::Command;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReviewComment {
@@ -38,7 +37,7 @@ pub fn fetch(repo: &str, max_pages: u32) -> Result<Vec<ReviewComment>> {
         let path = format!(
             "repos/{repo}/pulls/comments?sort=created&direction=desc&per_page=100&page={page}"
         );
-        let output = Command::new("gh")
+        let output = ingrain_core::process::command("gh")
             .args(["api", &path])
             .output()
             .context("failed to run `gh`; install the GitHub CLI and run `gh auth login`")?;

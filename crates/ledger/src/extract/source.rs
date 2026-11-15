@@ -6,7 +6,6 @@ use ingrain_core::Git;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Text {
@@ -146,7 +145,7 @@ pub fn docs(git: &Git, paths: &[String]) -> Result<Vec<Text>> {
 
 /// `owner/name` of the repository's GitHub remote, via `gh`.
 pub fn github_name(root: &Path) -> Result<String> {
-    let out = Command::new("gh")
+    let out = ingrain_core::process::command("gh")
         .args([
             "repo",
             "view",
@@ -166,7 +165,7 @@ pub fn github_name(root: &Path) -> Result<String> {
 }
 
 fn gh(path: &str) -> Result<Vec<Value>> {
-    let out = Command::new("gh")
+    let out = ingrain_core::process::command("gh")
         .args(["api", path])
         .output()
         .context("failed to run `gh`; install it and run `gh auth login`")?;

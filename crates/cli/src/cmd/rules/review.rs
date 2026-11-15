@@ -6,7 +6,7 @@ use ingrain_engine::CompiledRule;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 /// An entry in `.corrections/rejected.yml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,8 +168,8 @@ fn read_line(input: &mut impl BufRead) -> Result<Option<String>> {
 fn edit(path: &Path) -> Result<()> {
     let editor = std::env::var("VISUAL")
         .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".into());
-    let status = Command::new(&editor)
+        .unwrap_or_else(|_| if cfg!(windows) { "notepad" } else { "vi" }.into());
+    let status = ingrain_core::process::command(&editor)
         .arg(path)
         .status()
         .with_context(|| format!("starting {editor}"))?;

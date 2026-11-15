@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use ingrain_ledger::record::{Record, Rejection, Status};
 use std::io::{BufRead, Write};
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 /// Accept a proposal: give it the next `D-` id, make it live, and retire what it supersedes.
 /// The new record is written before the old one is retired, so a failure halfway never
@@ -200,8 +200,8 @@ fn edit(repo: &Repo, id: &str) -> Result<()> {
     let path = repo.ledger.pending_path(id)?;
     let editor = std::env::var("VISUAL")
         .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".into());
-    let status = Command::new(&editor)
+        .unwrap_or_else(|_| if cfg!(windows) { "notepad" } else { "vi" }.into());
+    let status = ingrain_core::process::command(&editor)
         .arg(&path)
         .status()
         .with_context(|| format!("starting {editor}"))?;

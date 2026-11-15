@@ -9,13 +9,11 @@ use std::process::{Command, Output, Stdio};
 const AGENT: &str = "Co-Authored-By: Claude <noreply@anthropic.com>";
 
 /// PATH with the built binary first, so installed hooks find `ingrain`.
-fn path_with_bin() -> String {
-    let bin = Path::new(env!("CARGO_BIN_EXE_ingrain"))
-        .parent()
+fn path_with_bin() -> std::ffi::OsString {
+    let bin = Path::new(env!("CARGO_BIN_EXE_ingrain")).parent().unwrap();
+    let rest = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&rest)))
         .unwrap()
-        .display()
-        .to_string();
-    format!("{bin}:{}", std::env::var("PATH").unwrap_or_default())
 }
 
 fn git(dir: &Path, args: &[&str]) {

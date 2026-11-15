@@ -2,6 +2,9 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Build (but don't publish) when the release workflow itself changes.
+  pull_request:
+    paths: [.github/workflows/release.yml]
 permissions:
   contents: write
 jobs:
@@ -13,6 +16,8 @@ jobs:
           - { os: macos-latest, target: x86_64-apple-darwin }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,16 +28,25 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name=ingrain-${GITHUB_REF_NAME}-${{ matrix.target }}
+          ref=${GITHUB_REF_NAME//\//-}
+          name=ingrain-${ref}-${{ matrix.target }}
           mkdir -p dist
-          tar -czf dist/$name.tar.gz -C target/${{ matrix.target }}/release ingrain -C "$GITHUB_WORKSPACE" LICENSE README.md
-          (cd dist && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/${{ matrix.target }}/release/ingrain.exe LICENSE README.md dist/
+            (cd dist && pwsh -NoProfile -Command "Compress-Archive -Path ingrain.exe,LICENSE,README.md -DestinationPath $name.zip" && rm ingrain.exe LICENSE README.md)
+            file=$name.zip
+          else
+            tar -czf dist/$name.tar.gz -C target/${{ matrix.target }}/release ingrain -C "$GITHUB_WORKSPACE" LICENSE README.md
+            file=$name.tar.gz
+          fi
+          (cd dist && if command -v sha256sum >/dev/null; then sha256sum $file; else shasum -a 256 $file; fi > $file.sha256)
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
           path: dist/*
   release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
