@@ -18,11 +18,24 @@ Rules come from two places:
 
 Nothing becomes a rule without a person accepting it.
 
+## Install
+
+```sh
+brew install wispagents/tap/ingrain
+# or a prebuilt binary from https://github.com/WispAgents/ingrain/releases
+# or from source:
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.1 ingrain
+```
+
+Needs `git`. Optional: `gh` (logged in) to read GitHub PRs, reviews and issues; Claude Code
+(`claude`) or `ANTHROPIC_API_KEY` for extraction and for rules templates can't express.
+
 ## Use it from your coding agent
 
-The fastest way in: give your agent the ingrain skills, then ask it to **"set up ingrain in this
-repo"**. The `ingrain-setup` skill installs the binary (after asking), runs `ingrain init`, turns
-the rules in your AGENTS.md / CONTRIBUTING.md into decisions for you to approve, and commits on a branch.
+With `ingrain` installed, give your agent the ingrain skills, then ask it to **"set up ingrain in
+this repo"**. The `ingrain-setup` skill runs `ingrain init` (and installs the binary first if it's
+missing, after asking), turns the rules in your AGENTS.md / CONTRIBUTING.md into decisions for
+you to approve, and commits on a branch.
 
 **Claude Code** (plugin: skills + hooks):
 
@@ -46,20 +59,7 @@ npx skills add WispAgents/ingrain
 
 The plugin's hooks act only in repos set up with `ingrain init`, and step aside where the repo's
 own `.claude/settings.json` already runs ingrain (no double checks). Without the `ingrain` binary
-they do nothing. Agents without hooks get an
-ingrain section in AGENTS.md (`ingrain init --agents-md`) and are caught by pre-commit and CI.
-
-## Install
-
-```sh
-brew install wispagents/tap/ingrain
-# or a prebuilt binary from https://github.com/WispAgents/ingrain/releases
-# or from source:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.1 ingrain
-```
-
-Needs `git`. Optional: `gh` (logged in) to read GitHub PRs, reviews and issues; Claude Code
-(`claude`) or `ANTHROPIC_API_KEY` for extraction and for rules templates can't express.
+they do nothing. Agents without hooks get an ingrain section in AGENTS.md (`ingrain init --agents-md`) and are caught by pre-commit and CI.
 
 ## Quick start
 
