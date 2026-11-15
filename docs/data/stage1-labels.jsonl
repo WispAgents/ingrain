@@ -1,0 +1,180 @@
+{"n": 1, "repo": "airbytehq/PyAirbyte", "correction": "f5befa3a1241", "label": "pattern", "why": "MCP tool params must not use Python-level defaults; use Field(default=)"}
+{"n": 2, "repo": "airbytehq/PyAirbyte", "correction": "0034bb03b2a8", "label": "taste", "why": "simplify conditional to `or` fallback"}
+{"n": 3, "repo": "airbytehq/PyAirbyte", "correction": "1aa928f24650", "label": "evolution", "why": "docstring expanded for new tracing feature"}
+{"n": 4, "repo": "airbytehq/PyAirbyte", "correction": "9f32c34b3f5b", "label": "evolution", "why": "function renamed for clarity during refactor"}
+{"n": 5, "repo": "airbytehq/PyAirbyte", "correction": "227092dfee45", "label": "evolution", "why": "constant renamed by human in same PR"}
+{"n": 6, "repo": "airbytehq/PyAirbyte", "correction": "50d2ba98e6b1", "label": "structural", "why": "inline SQL setup extracted into shared helper methods"}
+{"n": 7, "repo": "airbytehq/PyAirbyte", "correction": "a1fed0d5b100", "label": "evolution", "why": "obsolete docs removed after behavior change"}
+{"n": 8, "repo": "airbytehq/PyAirbyte", "correction": "70e464a9b7aa", "label": "evolution", "why": "module reorganization"}
+{"n": 9, "repo": "airbytehq/PyAirbyte", "correction": "76cdf92d0b6d", "label": "bugfix", "why": "single test key check widened to set of keys"}
+{"n": 10, "repo": "airbytehq/PyAirbyte", "correction": "ed175ba023f7", "label": "bugfix", "why": "script logic changed for dry-run output"}
+{"n": 11, "repo": "airbytehq/PyAirbyte", "correction": "88790b7297ce", "label": "taste", "why": "formatter style for assert message wrapping"}
+{"n": 12, "repo": "airbytehq/PyAirbyte", "correction": "047b24756bb4", "label": "bugfix", "why": "use fully-qualified names in COPY INTO SQL"}
+{"n": 13, "repo": "airbytehq/PyAirbyte", "correction": "f3c9d3b5aa4d", "label": "evolution", "why": "revert out-of-scope hardening"}
+{"n": 14, "repo": "airbytehq/PyAirbyte", "correction": "829b35f40d25", "label": "evolution", "why": "revert out-of-scope hardening"}
+{"n": 15, "repo": "airbytehq/PyAirbyte", "correction": "a59730521cb1", "label": "evolution", "why": "constant renamed by human in same PR"}
+{"n": 16, "repo": "airbytehq/PyAirbyte", "correction": "9a8c7d791177", "label": "taste", "why": "keyword name changed to preferred term"}
+{"n": 17, "repo": "airbytehq/PyAirbyte", "correction": "2d0734a2909a", "label": "evolution", "why": "method renamed by human"}
+{"n": 18, "repo": "airbytehq/PyAirbyte", "correction": "b81b98a7c1e2", "label": "evolution", "why": "revert out-of-scope hardening"}
+{"n": 19, "repo": "airbytehq/PyAirbyte", "correction": "e951c52e6795", "label": "evolution", "why": "module/function rename during reorganization"}
+{"n": 20, "repo": "airbytehq/PyAirbyte", "correction": "7d224891666f", "label": "evolution", "why": "doc example usage tweak"}
+{"n": 21, "repo": "airbytehq/PyAirbyte", "correction": "61666256673e", "label": "evolution", "why": "docs text removed"}
+{"n": 22, "repo": "airbytehq/PyAirbyte", "correction": "0275e6122da4", "label": "pattern", "why": "unsorted imports; isort/ruff I001 flags it"}
+{"n": 23, "repo": "airbytehq/PyAirbyte", "correction": "a2a7c474b283", "label": "evolution", "why": "docstring expanded for new feature"}
+{"n": 24, "repo": "airbytehq/PyAirbyte", "correction": "ca4c7a3c5d54", "label": "evolution", "why": "parameters removed as feature changed"}
+{"n": 25, "repo": "airbytehq/PyAirbyte", "correction": "c10c4bceb8f0", "label": "evolution", "why": "docs rewrite"}
+{"n": 26, "repo": "airbytehq/PyAirbyte", "correction": "8bdc6e41d5fc", "label": "taste", "why": "variable naming"}
+{"n": 27, "repo": "airbytehq/PyAirbyte", "correction": "a20ecd77849a", "label": "bugfix", "why": "hardcoded value should use defined constant"}
+{"n": 28, "repo": "airbytehq/PyAirbyte", "correction": "f401bf5cb72f", "label": "taste", "why": "naming of test function"}
+{"n": 29, "repo": "airbytehq/PyAirbyte", "correction": "84880f4b7e01", "label": "evolution", "why": "revert out-of-scope hardening"}
+{"n": 30, "repo": "airbytehq/PyAirbyte", "correction": "e2fc886225cb", "label": "bugfix", "why": "wrong mount directory path"}
+{"n": 31, "repo": "airbytehq/PyAirbyte", "correction": "204e0ea3813b", "label": "pattern", "why": "unused call results must be assigned to `_` (reportUnusedCallResult)"}
+{"n": 32, "repo": "airbytehq/PyAirbyte", "correction": "09aaf6152083", "label": "evolution", "why": "docs edits"}
+{"n": 33, "repo": "airbytehq/PyAirbyte", "correction": "bb112cfef334", "label": "evolution", "why": "revert of conftest changes"}
+{"n": 34, "repo": "airbytehq/PyAirbyte", "correction": "9e17f9a2c8e0", "label": "evolution", "why": "docstring updated after method rename"}
+{"n": 35, "repo": "airbytehq/PyAirbyte", "correction": "56e292e5e3c7", "label": "evolution", "why": "feature removed in cleanup"}
+{"n": 36, "repo": "airbytehq/PyAirbyte", "correction": "6d5c5c6354ed", "label": "evolution", "why": "docstring wording updated"}
+{"n": 37, "repo": "airbytehq/PyAirbyte", "correction": "65892e5b45c8", "label": "evolution", "why": "parameters removed during redesign"}
+{"n": 38, "repo": "airbytehq/PyAirbyte", "correction": "15cae0283011", "label": "evolution", "why": "venv/uv install logic reworked"}
+{"n": 39, "repo": "airbytehq/PyAirbyte", "correction": "0d232119daa2", "label": "pattern", "why": "unused call results must be assigned to `_`"}
+{"n": 40, "repo": "airbytehq/PyAirbyte", "correction": "beb39cba3148", "label": "pattern", "why": "MCP tool params must not use Python-level defaults; use Field(default=)"}
+{"n": 41, "repo": "airbytehq/PyAirbyte", "correction": "a7e65a1c5093", "label": "evolution", "why": "test renamed/trimmed"}
+{"n": 42, "repo": "airbytehq/PyAirbyte", "correction": "d436f2ae9b22", "label": "evolution", "why": "revert out-of-scope hardening"}
+{"n": 43, "repo": "airbytehq/PyAirbyte", "correction": "8f24d81fdd16", "label": "evolution", "why": "docs text removed"}
+{"n": 44, "repo": "airbytehq/PyAirbyte", "correction": "5d86b1a43dd5", "label": "bugfix", "why": "pending lookups need keyed dict not set"}
+{"n": 45, "repo": "airbytehq/PyAirbyte", "correction": "131ca6863004", "label": "evolution", "why": "refactor of vendor selection"}
+{"n": 46, "repo": "airbytehq/PyAirbyte", "correction": "1ef566469085", "label": "taste", "why": "unicode escape replaced by literal emoji"}
+{"n": 47, "repo": "airbytehq/PyAirbyte", "correction": "ee7e23cdfb6d", "label": "taste", "why": "simplify nested branching"}
+{"n": 48, "repo": "airbytehq/PyAirbyte", "correction": "10916d90e653", "label": "evolution", "why": "class renamed"}
+{"n": 49, "repo": "airbytehq/PyAirbyte", "correction": "ac9f375fca90", "label": "evolution", "why": "revert of conftest changes"}
+{"n": 50, "repo": "airbytehq/PyAirbyte", "correction": "d14200623f1b", "label": "bugfix", "why": "duplicated /v1 in endpoint path"}
+{"n": 51, "repo": "airbytehq/PyAirbyte", "correction": "845f2cfb26f5", "label": "evolution", "why": "parameter removed with feature cleanup"}
+{"n": 52, "repo": "airbytehq/PyAirbyte", "correction": "639f1c555141", "label": "evolution", "why": "output shape changed"}
+{"n": 53, "repo": "airbytehq/PyAirbyte", "correction": "9c734ef5d8e0", "label": "evolution", "why": "description wording"}
+{"n": 54, "repo": "airbytehq/PyAirbyte", "correction": "9e91d8f1c80c", "label": "evolution", "why": "test assertion trimmed"}
+{"n": 55, "repo": "airbytehq/PyAirbyte", "correction": "35df00fd96da", "label": "evolution", "why": "docstring wording"}
+{"n": 56, "repo": "airbytehq/PyAirbyte", "correction": "b743515e7e5d", "label": "evolution", "why": "code removed with feature change"}
+{"n": 57, "repo": "airbytehq/PyAirbyte", "correction": "e382767abd77", "label": "evolution", "why": "option renamed"}
+{"n": 58, "repo": "airbytehq/PyAirbyte", "correction": "1e57184adfaf", "label": "evolution", "why": "function renamed"}
+{"n": 59, "repo": "airbytehq/PyAirbyte", "correction": "2cfcf8e9c003", "label": "pattern", "why": "unused noqa directive (ruff RUF100)"}
+{"n": 60, "repo": "airbytehq/PyAirbyte", "correction": "de1076921e8a", "label": "taste", "why": "variable naming simplification"}
+{"n": 61, "repo": "anthropics/claude-agent-sdk-python", "correction": "5bae81f10eb5", "label": "bugfix", "why": "mypy error suppressed on untyped decorator"}
+{"n": 62, "repo": "anthropics/claude-agent-sdk-python", "correction": "5c773adea348", "label": "bugfix", "why": "internal modes wrongly exposed in public type"}
+{"n": 63, "repo": "anthropics/claude-agent-sdk-python", "correction": "3b7f517e2219", "label": "bugfix", "why": "unusable hook types wrongly exported"}
+{"n": 64, "repo": "anthropics/claude-agent-sdk-python", "correction": "c790a7276f33", "label": "evolution", "why": "test removed during simplification"}
+{"n": 65, "repo": "anthropics/claude-agent-sdk-python", "correction": "746616e990ba", "label": "bugfix", "why": "snapshot-based task tracking logic wrong"}
+{"n": 66, "repo": "anthropics/claude-agent-sdk-python", "correction": "6e1c644cb47e", "label": "evolution", "why": "import removed after code rewrite"}
+{"n": 67, "repo": "anthropics/claude-agent-sdk-python", "correction": "d68b69a29ada", "label": "bugfix", "why": "test expected wrong conversion behavior"}
+{"n": 68, "repo": "anthropics/claude-agent-sdk-python", "correction": "e968e519e4f4", "label": "taste", "why": "simplified title handling"}
+{"n": 69, "repo": "anthropics/claude-agent-sdk-python", "correction": "e40ac7f11ba7", "label": "evolution", "why": "test setup change"}
+{"n": 70, "repo": "anthropics/claude-agent-sdk-python", "correction": "e665b2e8e30e", "label": "taste", "why": "loop simplified with asdict comprehension"}
+{"n": 71, "repo": "anthropics/claude-agent-sdk-python", "correction": "e6492443c038", "label": "evolution", "why": "test comment rewritten for fixed behavior"}
+{"n": 72, "repo": "anthropics/claude-agent-sdk-python", "correction": "6d24e85cbefa", "label": "pattern", "why": "deprecated ClaudeCodeOptions; use ClaudeAgentOptions"}
+{"n": 73, "repo": "anthropics/claude-agent-sdk-python", "correction": "e4cd031f2b3d", "label": "bugfix", "why": "Python 3.10 compat for typeddict helpers"}
+{"n": 74, "repo": "anthropics/claude-agent-sdk-python", "correction": "0c524fd32e0d", "label": "bugfix", "why": "test expected wrong conversion behavior"}
+{"n": 75, "repo": "anthropics/claude-agent-sdk-python", "correction": "cbab90f9caa7", "label": "evolution", "why": "feature: include Annotated extras"}
+{"n": 76, "repo": "anthropics/claude-agent-sdk-python", "correction": "74b0a2a52161", "label": "pattern", "why": "repo bans @pytest.mark.anyio; use sync def + anyio.run"}
+{"n": 77, "repo": "anthropics/claude-agent-sdk-python", "correction": "645739b11985", "label": "evolution", "why": "import removed after code rewrite"}
+{"n": 78, "repo": "anthropics/claude-agent-sdk-python", "correction": "88c95355060f", "label": "bugfix", "why": "wrong MCP response routing"}
+{"n": 79, "repo": "anthropics/claude-agent-sdk-python", "correction": "b072c987f585", "label": "evolution", "why": "test comment edit"}
+{"n": 80, "repo": "anthropics/claude-agent-sdk-python", "correction": "222c5287ebba", "label": "evolution", "why": "test comment removed"}
+{"n": 81, "repo": "anthropics/claude-agent-sdk-python", "correction": "ea24419d0439", "label": "evolution", "why": "docstring rewritten for changed behavior"}
+{"n": 82, "repo": "anthropics/claude-agent-sdk-python", "correction": "5a2f667fdd72", "label": "bugfix", "why": "wrong expected value in test"}
+{"n": 83, "repo": "anthropics/claude-agent-sdk-python", "correction": "3a3bf6c70f69", "label": "bugfix", "why": "wrong MCP SDK API usage"}
+{"n": 84, "repo": "anthropics/claude-agent-sdk-python", "correction": "387c69f6e091", "label": "bugfix", "why": "wrong MCP SDK response handling"}
+{"n": 85, "repo": "anthropics/claude-agent-sdk-python", "correction": "9683ad344a48", "label": "pattern", "why": "print debugging left in tests"}
+{"n": 86, "repo": "anthropics/claude-agent-sdk-python", "correction": "45aebb25e823", "label": "bugfix", "why": "non-list content should raise, not coerce"}
+{"n": 87, "repo": "anthropics/claude-agent-sdk-python", "correction": "315361b8d086", "label": "evolution", "why": "imports for new feature"}
+{"n": 88, "repo": "anthropics/claude-agent-sdk-python", "correction": "d0a90156e724", "label": "bugfix", "why": "unusable hook types wrongly added"}
+{"n": 89, "repo": "anthropics/claude-agent-sdk-python", "correction": "9d5556e95b70", "label": "bugfix", "why": "test checked wrong condition"}
+{"n": 90, "repo": "anthropics/claude-agent-sdk-python", "correction": "ae3e16355fe8", "label": "bugfix", "why": "wrong literal subtype value"}
+{"n": 91, "repo": "anthropics/claude-agent-sdk-python", "correction": "6ff5742db501", "label": "pattern", "why": "deprecated claude-3 model IDs in docs/code"}
+{"n": 92, "repo": "anthropics/claude-agent-sdk-python", "correction": "13051985de44", "label": "pattern", "why": "uppercase variable in function (ruff N806)"}
+{"n": 93, "repo": "anthropics/claude-agent-sdk-python", "correction": "937bcb8ae28e", "label": "taste", "why": "variable naming"}
+{"n": 94, "repo": "anthropics/claude-agent-sdk-python", "correction": "c0fdd2b3acd8", "label": "pattern", "why": "deprecated ClaudeCodeOptions; use ClaudeAgentOptions"}
+{"n": 95, "repo": "anthropics/claude-agent-sdk-python", "correction": "9abcd843ee3b", "label": "bugfix", "why": "handle explicit None value from dict.get"}
+{"n": 96, "repo": "anthropics/claude-agent-sdk-python", "correction": "f04bfaf2dc0b", "label": "evolution", "why": "requirement change: add mode"}
+{"n": 97, "repo": "anthropics/claude-agent-sdk-python", "correction": "fdfe07c49f17", "label": "bugfix", "why": "wrong MCP SDK API usage"}
+{"n": 98, "repo": "anthropics/claude-agent-sdk-python", "correction": "e80734b1fa75", "label": "bugfix", "why": "tests for wrongly exposed modes"}
+{"n": 99, "repo": "anthropics/claude-agent-sdk-python", "correction": "e3dace10f980", "label": "evolution", "why": "docstring for changed behavior"}
+{"n": 100, "repo": "anthropics/claude-agent-sdk-python", "correction": "7131e4b016cb", "label": "bugfix", "why": "missing error handling on stdin write"}
+{"n": 101, "repo": "anthropics/claude-agent-sdk-python", "correction": "be06507dcce7", "label": "taste", "why": "variable naming"}
+{"n": 102, "repo": "anthropics/claude-agent-sdk-python", "correction": "1250d5e0b001", "label": "bugfix", "why": "mypy variable redefinition with different type"}
+{"n": 103, "repo": "anthropics/claude-agent-sdk-python", "correction": "80564a3b37cd", "label": "evolution", "why": "test prompt tweak"}
+{"n": 104, "repo": "anthropics/claude-agent-sdk-python", "correction": "99d139152e1b", "label": "bugfix", "why": "missing uuid guard"}
+{"n": 105, "repo": "anthropics/claude-agent-sdk-python", "correction": "067597ea22c1", "label": "bugfix", "why": "doc example missing required option"}
+{"n": 106, "repo": "anthropics/claude-agent-sdk-python", "correction": "cbb5e9ef576e", "label": "bugfix", "why": "missing scientific notation parsing"}
+{"n": 107, "repo": "anthropics/claude-agent-sdk-python", "correction": "721a4dd2da5c", "label": "evolution", "why": "code removed in rewrite"}
+{"n": 108, "repo": "anthropics/claude-agent-sdk-python", "correction": "945731de4b1a", "label": "pattern", "why": "bare dict annotation without type parameters"}
+{"n": 109, "repo": "anthropics/claude-agent-sdk-python", "correction": "9c8a8be832d7", "label": "evolution", "why": "test comment updated"}
+{"n": 110, "repo": "anthropics/claude-agent-sdk-python", "correction": "a5ad661aba24", "label": "evolution", "why": "docstring expanded"}
+{"n": 111, "repo": "anthropics/claude-agent-sdk-python", "correction": "c003bcdd1f4c", "label": "bugfix", "why": "test expected wrong conversion behavior"}
+{"n": 112, "repo": "anthropics/claude-agent-sdk-python", "correction": "fdd880bdd6b5", "label": "evolution", "why": "test docstring wording"}
+{"n": 113, "repo": "anthropics/claude-agent-sdk-python", "correction": "370720404638", "label": "bugfix", "why": "mypy typeddict-item suppression"}
+{"n": 114, "repo": "anthropics/claude-agent-sdk-python", "correction": "8d616c7963ca", "label": "bugfix", "why": "unusable hook type wrongly added"}
+{"n": 115, "repo": "anthropics/claude-agent-sdk-python", "correction": "3449f9f76fee", "label": "pattern", "why": "typing.TypedDict with NotRequired on py3.10; use typing_extensions"}
+{"n": 116, "repo": "anthropics/claude-agent-sdk-python", "correction": "12006e9f7dac", "label": "bugfix", "why": "wrong compat fallback logic"}
+{"n": 117, "repo": "anthropics/claude-agent-sdk-python", "correction": "3919f91a2aab", "label": "bugfix", "why": "unusable hook types wrongly exported"}
+{"n": 118, "repo": "anthropics/claude-agent-sdk-python", "correction": "d32bc11100d5", "label": "pattern", "why": "deprecated ClaudeCodeOptions; use ClaudeAgentOptions"}
+{"n": 119, "repo": "anthropics/claude-agent-sdk-python", "correction": "983166e956b1", "label": "bugfix", "why": "timeout type should be float"}
+{"n": 120, "repo": "anthropics/claude-agent-sdk-python", "correction": "be8260300cdd", "label": "pattern", "why": "Any/str used where specific HookEvent/HookMatcher types exist"}
+{"n": 121, "repo": "simonw/datasette", "correction": "9cdf47b5d7d8", "label": "evolution", "why": "docstring link added"}
+{"n": 122, "repo": "simonw/datasette", "correction": "246a9beb840e", "label": "evolution", "why": "test comment update"}
+{"n": 123, "repo": "simonw/datasette", "correction": "3997c26af5ee", "label": "evolution", "why": "API signature change"}
+{"n": 124, "repo": "simonw/datasette", "correction": "f42eab9b1124", "label": "evolution", "why": "UI text change"}
+{"n": 125, "repo": "simonw/datasette", "correction": "24aef78ebb82", "label": "evolution", "why": "new helper introduced by human"}
+{"n": 126, "repo": "simonw/datasette", "correction": "7505094cfb02", "label": "evolution", "why": "doc text expanded"}
+{"n": 127, "repo": "simonw/datasette", "correction": "aa0521824702", "label": "bugfix", "why": "sort value decoding loses types"}
+{"n": 128, "repo": "simonw/datasette", "correction": "5e103351e4f6", "label": "evolution", "why": "refactor removed import"}
+{"n": 129, "repo": "simonw/datasette", "correction": "fc7de06fd835", "label": "structural", "why": "use shared module fixture instead of ad-hoc instance"}
+{"n": 130, "repo": "simonw/datasette", "correction": "e6266a2031b3", "label": "taste", "why": "attribute naming"}
+{"n": 131, "repo": "simonw/datasette", "correction": "364c9f31b1e1", "label": "structural", "why": "use existing bare_ds fixture"}
+{"n": 132, "repo": "simonw/datasette", "correction": "52d1d732ae27", "label": "evolution", "why": "docstring for changed function"}
+{"n": 133, "repo": "simonw/datasette", "correction": "02ba0b160e1a", "label": "evolution", "why": "requirement change: reasons become list"}
+{"n": 134, "repo": "simonw/datasette", "correction": "25f427acba28", "label": "pattern", "why": "Optional[X] instead of X | None (ruff UP007)"}
+{"n": 135, "repo": "simonw/datasette", "correction": "0f63e8634f38", "label": "evolution", "why": "class moved to new module"}
+{"n": 136, "repo": "simonw/datasette", "correction": "5a9166baedd7", "label": "pattern", "why": "typing.Optional import (UP007/UP045)"}
+{"n": 137, "repo": "simonw/datasette", "correction": "4a5c0aa7a521", "label": "structural", "why": "test refactor to shared fixture"}
+{"n": 138, "repo": "simonw/datasette", "correction": "65b4cf93c796", "label": "bugfix", "why": "SQLite version-dependent assertion"}
+{"n": 139, "repo": "simonw/datasette", "correction": "5ae20daa2da0", "label": "evolution", "why": "default format changed to HTML"}
+{"n": 140, "repo": "simonw/datasette", "correction": "b38d95d4aa3d", "label": "structural", "why": "use existing bare_ds fixture"}
+{"n": 141, "repo": "simonw/datasette", "correction": "82b6400c1d97", "label": "evolution", "why": "feature: applicability check"}
+{"n": 142, "repo": "simonw/datasette", "correction": "7ed0f285b6c7", "label": "evolution", "why": "redesign of PermissionSQL"}
+{"n": 143, "repo": "simonw/datasette", "correction": "2124eab9b457", "label": "taste", "why": "approach change: SQL LIKE instead of regex"}
+{"n": 144, "repo": "simonw/datasette", "correction": "4dc6a20e5281", "label": "evolution", "why": "doc text"}
+{"n": 145, "repo": "simonw/datasette", "correction": "14f70341ff0c", "label": "bugfix", "why": "cursor detection must check nested results"}
+{"n": 146, "repo": "simonw/datasette", "correction": "abfbb7ea8d96", "label": "structural", "why": "duplicate schema query; use existing helper"}
+{"n": 147, "repo": "simonw/datasette", "correction": "de8caea31c4b", "label": "structural", "why": "use existing bare_ds fixture"}
+{"n": 148, "repo": "simonw/datasette", "correction": "48838a5091ce", "label": "evolution", "why": "doc text expanded"}
+{"n": 149, "repo": "simonw/datasette", "correction": "2acb9393a638", "label": "evolution", "why": "doc text expanded"}
+{"n": 150, "repo": "simonw/datasette", "correction": "c44282f082a7", "label": "evolution", "why": "doc text"}
+{"n": 151, "repo": "simonw/datasette", "correction": "39f1d5f45e96", "label": "evolution", "why": "class renamed"}
+{"n": 152, "repo": "simonw/datasette", "correction": "c5a6f54c52ed", "label": "structural", "why": "tests consolidated with parametrize and shared fixture"}
+{"n": 153, "repo": "simonw/datasette", "correction": "6f0f162157d9", "label": "evolution", "why": "function renamed"}
+{"n": 154, "repo": "simonw/datasette", "correction": "3461bb760297", "label": "evolution", "why": "doc text"}
+{"n": 155, "repo": "simonw/datasette", "correction": "c69f98d29c3c", "label": "evolution", "why": "function renamed"}
+{"n": 156, "repo": "simonw/datasette", "correction": "55c3b8975816", "label": "bugfix", "why": "missing error handling"}
+{"n": 157, "repo": "simonw/datasette", "correction": "174d12f77c85", "label": "structural", "why": "test refactor consolidation"}
+{"n": 158, "repo": "simonw/datasette", "correction": "1b386c655a43", "label": "structural", "why": "test refactor to shared fixture"}
+{"n": 159, "repo": "simonw/datasette", "correction": "1cf6846eea54", "label": "structural", "why": "test refactor consolidation"}
+{"n": 160, "repo": "simonw/datasette", "correction": "d68a0a7b0856", "label": "evolution", "why": "comment updated after rename"}
+{"n": 161, "repo": "simonw/datasette", "correction": "41ec0d1b66b4", "label": "bugfix", "why": "test used clashing database names"}
+{"n": 162, "repo": "simonw/datasette", "correction": "fab5f02fab8e", "label": "evolution", "why": "test fixture name change"}
+{"n": 163, "repo": "simonw/datasette", "correction": "f932748c2c1b", "label": "evolution", "why": "redirect target changed"}
+{"n": 164, "repo": "simonw/datasette", "correction": "d21090b63f4d", "label": "taste", "why": "attribute naming"}
+{"n": 165, "repo": "simonw/datasette", "correction": "6e33e245d56f", "label": "evolution", "why": "class renamed"}
+{"n": 166, "repo": "simonw/datasette", "correction": "652af9c11124", "label": "evolution", "why": "API made keyword-only"}
+{"n": 167, "repo": "simonw/datasette", "correction": "7cd8553dc921", "label": "evolution", "why": "class renamed and moved"}
+{"n": 168, "repo": "simonw/datasette", "correction": "209f0a108a04", "label": "evolution", "why": "hook removed, column dropped"}
+{"n": 169, "repo": "simonw/datasette", "correction": "977077ded157", "label": "structural", "why": "test refactor consolidation"}
+{"n": 170, "repo": "simonw/datasette", "correction": "044a68aa70d2", "label": "evolution", "why": "docstring for changed function"}
+{"n": 171, "repo": "simonw/datasette", "correction": "1d9b734f7b49", "label": "bugfix", "why": "wrong name delimiter in filter"}
+{"n": 172, "repo": "simonw/datasette", "correction": "d882b08bdab9", "label": "evolution", "why": "redesign removed code"}
+{"n": 173, "repo": "simonw/datasette", "correction": "784c1c9180f7", "label": "structural", "why": "use existing bare_ds fixture"}
+{"n": 174, "repo": "simonw/datasette", "correction": "d559d7f5e067", "label": "evolution", "why": "import unused after human refactor"}
+{"n": 175, "repo": "simonw/datasette", "correction": "ccb2107b7ce6", "label": "evolution", "why": "function renamed"}
+{"n": 176, "repo": "simonw/datasette", "correction": "0a71d48cbcc9", "label": "evolution", "why": "class moved to new module"}
+{"n": 177, "repo": "simonw/datasette", "correction": "92825e51311b", "label": "evolution", "why": "imports for new feature"}
+{"n": 178, "repo": "simonw/datasette", "correction": "b5b3aef218c0", "label": "bugfix", "why": "wrong cursor splitting"}
+{"n": 179, "repo": "simonw/datasette", "correction": "52b6bd367c8e", "label": "pattern", "why": "unused import (ruff F401)"}
+{"n": 180, "repo": "simonw/datasette", "correction": "365910b323d5", "label": "bugfix", "why": "test used clashing database names"}

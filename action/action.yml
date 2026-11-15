@@ -1,0 +1,18 @@
+name: ingrain check
+description: Fail pull requests that add code breaking rules learned from past corrections of agent code.
+inputs:
+  base:
+    description: Revision to diff against. Defaults to the pull request base.
+    default: ${{ github.event.pull_request.base.sha }}
+  version:
+    description: Git ref of ingrain to install.
+    default: main
+runs:
+  using: composite
+  steps:
+    - name: Install ingrain
+      shell: bash
+      run: cargo install --locked --git https://github.com/WispAgents/ingrain --rev "${{ inputs.version }}" ingrain
+    - name: Check added lines
+      shell: bash
+      run: ingrain check --diff "${{ inputs.base }}...HEAD" --format github

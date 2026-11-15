@@ -1,0 +1,21 @@
+[package]
+name = "ingrain-learn"
+description = "Capture corrections, cluster them, synthesize and backtest rules, evaluate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+rayon.workspace = true
+globset.workspace = true
+ureq.workspace = true
+tempfile.workspace = true
+ingrain-core.workspace = true
+ingrain-engine.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

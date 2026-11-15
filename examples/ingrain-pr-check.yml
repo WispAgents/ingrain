@@ -1,0 +1,11 @@
+# Copy to .github/workflows/ingrain.yml in a repository that has .corrections/rules/.
+name: ingrain
+on: pull_request
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the base commit must be available for the diff
+      - uses: WispAgents/ingrain/action@main
