@@ -33,6 +33,28 @@ pub enum Content {
 }
 
 impl DiffBase {
+    /// The revision holding the "before" side, for comparing manifests and loading the ledger
+    /// a change is judged against.
+    pub fn before_rev(&self, git: &Git) -> Option<String> {
+        match self {
+            DiffBase::Head | DiffBase::Staged => git.has_head().then(|| "HEAD".to_owned()),
+            DiffBase::Range(range) => {
+                if let Some((a, b)) = range.split_once("...") {
+                    let b = if b.is_empty() { "HEAD" } else { b };
+                    git.try_run(&["merge-base", "--end-of-options", a, b])
+                        .map(|s| s.trim().to_owned())
+                } else {
+                    Some(
+                        range
+                            .split_once("..")
+                            .map_or(range.as_str(), |(a, _)| a)
+                            .to_owned(),
+                    )
+                }
+            }
+        }
+    }
+
     /// The side of the diff whose line numbers `added_lines` reports.
     pub fn content(&self) -> Content {
         match self {
@@ -93,7 +115,7 @@ impl Git {
 
     /// File content at a revision, or `None` if the path doesn't exist there.
     pub fn show(&self, rev: &str, path: &str) -> Option<String> {
-        self.try_run(&["show", &format!("{rev}:{path}")])
+        self.try_run(&["show", "--end-of-options", &format!("{rev}:{path}")])
     }
 
     /// File content in the index (staged version).
@@ -128,6 +150,8 @@ impl Git {
             "--no-color",
             "--no-ext-diff",
             "-U0",
+            // Re-indenting existing code isn't adding it.
+            "-w",
             "-M",
             "--src-prefix=a/",
             "--dst-prefix=b/",
@@ -195,26 +219,41 @@ impl Git {
         Ok(ranges)
     }
 
-    /// Path relative to the repository root, with `/` separators.
-    pub fn relative(&self, path: &Path) -> String {
+    /// Path relative to the repository root, with `/` separators, or `None` if it's outside
+    /// the repository. Works for files that don't exist yet, and through symlinked paths
+    /// (macOS `/tmp` → `/private/tmp`): the nearest existing ancestor is canonicalized.
+    pub fn relative_in_repo(&self, path: &Path) -> Option<String> {
         let abs = if path.is_absolute() {
             path.to_path_buf()
         } else {
-            std::env::current_dir()
-                .map(|d| d.join(path))
-                .unwrap_or_else(|_| path.to_path_buf())
+            std::env::current_dir().ok()?.join(path)
         };
-        let abs = PathBuf::from(normalize_path(&abs.to_string_lossy()));
-        let root = std::fs::canonicalize(&self.root)
-            .map(|p| PathBuf::from(normalize_path(&p.to_string_lossy())))
-            .unwrap_or_else(|_| self.root.clone());
-        let abs = std::fs::canonicalize(&abs)
-            .map(|p| PathBuf::from(normalize_path(&p.to_string_lossy())))
-            .unwrap_or(abs);
-        abs.strip_prefix(&root)
-            .unwrap_or(&abs)
-            .to_string_lossy()
-            .replace('\\', "/")
+        let canon = |p: &Path| {
+            std::fs::canonicalize(p)
+                .ok()
+                .map(|c| PathBuf::from(normalize_path(&c.to_string_lossy())))
+        };
+        let root = canon(&self.root).unwrap_or_else(|| self.root.clone());
+        // Walk up to an existing ancestor, canonicalize it, then re-append the rest.
+        let mut existing = abs.as_path();
+        let mut rest: Vec<&std::ffi::OsStr> = Vec::new();
+        let base = loop {
+            if let Some(c) = canon(existing) {
+                break c;
+            }
+            rest.push(existing.file_name()?);
+            existing = existing.parent()?;
+        };
+        let full = rest.iter().rev().fold(base, |p, part| p.join(part));
+        let rel = full.strip_prefix(&root).ok()?;
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        (!rel.is_empty() && !rel.starts_with("../")).then_some(rel)
+    }
+
+    /// Like `relative_in_repo`, for command-line arguments: paths outside stay as given.
+    pub fn relative(&self, path: &Path) -> String {
+        self.relative_in_repo(path)
+            .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
     }
 }
 
@@ -316,6 +355,26 @@ mod tests {
             Content::WorkingTree
         );
         assert_eq!(DiffBase::Staged.content(), Content::Index);
+    }
+
+    #[test]
+    fn relative_paths_for_new_files_and_outside_paths() {
+        let dir = init_repo();
+        let repo = Git::open(dir.path()).unwrap();
+        let new = dir.path().join("src/new/dir/file.ts");
+        assert_eq!(
+            repo.relative_in_repo(&new).as_deref(),
+            Some("src/new/dir/file.ts")
+        );
+        assert_eq!(
+            repo.relative_in_repo(Path::new("/definitely/elsewhere/x.md")),
+            None
+        );
+        assert_eq!(
+            repo.relative_in_repo(dir.path()),
+            None,
+            "the root itself is not a file"
+        );
     }
 
     #[test]

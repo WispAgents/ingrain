@@ -1,7 +1,9 @@
 //! One module per subcommand.
 
 pub mod check;
+pub mod decisions;
 pub mod eval;
+pub mod hook;
 pub mod init;
 pub mod mine;
 pub mod propose;

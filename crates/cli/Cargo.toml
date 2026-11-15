@@ -20,6 +20,7 @@ globset.workspace = true
 ingrain-core.workspace = true
 ingrain-engine.workspace = true
 ingrain-learn.workspace = true
+ingrain-ledger.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

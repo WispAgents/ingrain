@@ -1,0 +1,74 @@
+{"id": "pr734", "index": 0, "label": "durable", "scope": "ok", "why": "Read-only SQL restriction on default cache is a lasting constraint."}
+{"id": "pr67", "index": 0, "label": "durable", "scope": "ok", "why": "Removing the PyArrow dependency in favor of JSONL is an architectural choice."}
+{"id": "rc4067549919", "index": 0, "label": "one_off", "scope": "ok", "why": "Asks for a missing test on specific tools, not a general rule."}
+{"id": "rc3930159298", "index": 0, "label": "durable", "scope": "ok", "why": "Unit tests must not hit real registry/network; a reasonable general convention."}
+{"id": "rc4188150956", "index": 0, "label": "durable", "scope": "ok", "why": "Tools touching external systems keep open_world and join the allowlist."}
+{"id": "ceb041fb62f", "index": 0, "label": "one_off", "scope": "ok", "why": "Specific CI fix with no stated rationale or general rule."}
+{"id": "c8f1d69c4c8", "index": 0, "label": "durable", "scope": "ok", "why": "Allowlist-gated header honoring is a lasting security constraint."}
+{"id": "pr1091", "index": 0, "label": "durable", "scope": "ok", "why": "Defines the lasting schema-detection rule in _build_schema."}
+{"id": "pr1352", "index": 0, "label": "durable", "scope": "ok", "why": "Strict inline settings parsing is a lasting error-handling constraint."}
+{"id": "pr1352", "index": 1, "label": "durable", "scope": "ok", "why": "Documented missing-file degradation must be preserved."}
+{"id": "pr1352", "index": 2, "label": "one_off", "scope": "ok", "why": "Specific code move fixing this bug; little future guidance."}
+{"id": "pr1420", "index": 0, "label": "durable", "scope": "ok", "why": "Fork remapping of compaction references is a lasting invariant."}
+{"id": "pr1420", "index": 1, "label": "durable", "scope": "ok", "why": "Trim/drop rules for excluded IDs are explicitly stated behavior."}
+{"id": "pr1420", "index": 2, "label": "durable", "scope": "ok", "why": "Compact-boundary cutoff behavior is backed by a measured failure."}
+{"id": "pr1420", "index": 3, "label": "durable", "scope": "ok", "why": "Explicitly rejects a blanket UUID validator, with a reason."}
+{"id": "pr1420", "index": 4, "label": "durable", "scope": "ok", "why": "Non-mutation of source entries is a lasting fork invariant."}
+{"id": "pr717", "index": 0, "label": "durable", "scope": "ok", "why": "Returning CallToolResult to preserve is_error is a lasting rule."}
+{"id": "rc3108847123", "index": 0, "label": "durable", "scope": "ok", "why": "Filter-then-paginate for the fast path is a lasting consistency rule."}
+{"id": "rc3103682474", "index": 0, "label": "durable", "scope": "ok", "why": "Store listing must paginate the filtered set, matching the disk path."}
+{"id": "rc4126205123", "index": 0, "label": "durable", "scope": "ok", "why": "E2E user isolation from the runner is a lasting CI security constraint."}
+{"id": "pr200", "index": 0, "label": "durable", "scope": "ok", "why": "Hiding SpatiaLite system tables is lasting product behavior."}
+{"id": "pr3026", "index": 0, "label": "durable", "scope": "ok", "why": "Facets computed on pre-pagination SQL is a lasting constraint."}
+{"id": "pr3026", "index": 1, "label": "durable", "scope": "ok", "why": "_next handling rules for facet links are clearly stated."}
+{"id": "pr2242", "index": 0, "label": "durable", "scope": "ok", "why": "track_event mechanism for instrumenting actions is architectural."}
+{"id": "rc415492357", "index": 0, "label": "durable", "scope": "ok", "why": "Immutability rule tied to inspect-data.json is lasting behavior."}
+{"id": "c84ec7134f6", "index": 0, "label": "one_off", "scope": "ok", "why": "Narrow bug fix for the CSV export form."}
+{"id": "cd657fb4315", "index": 0, "label": "durable", "scope": "ok", "why": "Use route_path for request-derived URLs to avoid a double base_url."}
+{"id": "cd657fb4315", "index": 1, "label": "one_off", "scope": "ok", "why": "Constraint limited to this fix's scope."}
+{"id": "pr4669", "index": 0, "label": "durable", "scope": "ok", "why": "Intentional oneOf-as-Union semantics without exclusivity."}
+{"id": "pr4669", "index": 1, "label": "durable", "scope": "ok", "why": "allOf merge semantics are a lasting conversion rule."}
+{"id": "pr3797", "index": 0, "label": "durable", "scope": "ok", "why": "Dual-audience acceptance prevents regressions in both directions."}
+{"id": "pr2738", "index": 0, "label": "durable", "scope": "ok", "why": "Internal FastMCP types with SDK types at the boundary is architectural."}
+{"id": "pr2738", "index": 1, "label": "durable", "scope": "ok", "why": "Breaking API change: PromptMessage returns are no longer supported."}
+{"id": "rc3653102402", "index": 0, "label": "durable", "scope": "ok", "why": "Chain traversal rule for shortfall disclosure is explicitly specified."}
+{"id": "rc3653102402", "index": 1, "label": "durable", "scope": "ok", "why": "Opaque denials naming no scopes is a stated invariant."}
+{"id": "rc3653102402", "index": 2, "label": "durable", "scope": "ok", "why": "Accepted consequence documented; 'multiple rounds' is a slight inference."}
+{"id": "rc3657656201", "index": 0, "label": "durable", "scope": "ok", "why": "File's own rule: fixture gaps go in server.py, not baselines."}
+{"id": "rc3657656201", "index": 1, "label": "durable", "scope": "ok", "why": "Shipped wire path must stay supported because the proxy relay depends on it."}
+{"id": "is4769", "index": 0, "label": "durable", "scope": "bad", "why": "Explicit policy is a real decision; proxy lives in server/providers/proxy.py."}
+{"id": "is4769", "index": 1, "label": "durable", "scope": "bad", "why": "Stated constraint; scope misses the providers/proxy.py location."}
+{"id": "is4769", "index": 2, "label": "durable", "scope": "bad", "why": "Clear metadata-handling rule; scope path is likely stale."}
+{"id": "is5551", "index": 0, "label": "durable", "scope": "ok", "why": "Spec-backed rule: IDs are opaque, so match by tool_use_id."}
+{"id": "ic6775748875", "index": 0, "label": "durable", "scope": "ok", "why": "Scope choice to skip a shared serialization layer for now."}
+{"id": "rc4232612504", "index": 0, "label": "durable", "scope": "ok", "why": "Validation and stringification were deliberately removed from Logfire."}
+{"id": "rc4232612504", "index": 1, "label": "one_off", "scope": "ok", "why": "Assertion detail specific to one test."}
+{"id": "rc3627881221", "index": 0, "label": "one_off", "scope": "ok", "why": "Fix for a single regression test, not a stated project convention."}
+{"id": "pr24271", "index": 0, "label": "durable", "scope": "ok", "why": "Establishes the span op for component definition lookups."}
+{"id": "pr24271", "index": 1, "label": "durable", "scope": "ok", "why": "States that ops are not gated on streaming, unlike names."}
+{"id": "pr24271", "index": 2, "label": "durable", "scope": "ok", "why": "Span naming convention per lifecycle, documented in MIGRATION.md."}
+{"id": "pr24271", "index": 3, "label": "one_off", "scope": "ok", "why": "Pending TODO cleanup, not an ongoing rule."}
+{"id": "pr24271", "index": 4, "label": "durable", "scope": "ok", "why": "Flag provides the only CI coverage of ui.resolve."}
+{"id": "pr20230", "index": 0, "label": "durable", "scope": "ok", "why": "Default-behavior change for the integration option."}
+{"id": "pr17662", "index": 0, "label": "durable", "scope": "ok", "why": "Return contract matching the TransportMakeRequestResponse type."}
+{"id": "rc4536586336", "index": 0, "label": "one_off", "scope": "ok", "why": "Reviewer suggestion for this PR's bundle issue, not a settled decision."}
+{"id": "rc4536586336", "index": 1, "label": "one_off", "scope": "ok", "why": "Suggested test for this specific fix."}
+{"id": "is23777", "index": 0, "label": "one_off", "scope": "ok", "why": "Future conditional task, not a code convention."}
+{"id": "c85e545529b", "index": 0, "label": "durable", "scope": "ok", "why": "SDK-wide adoption of the conventions constant."}
+{"id": "c85e545529b", "index": 1, "label": "durable", "scope": "ok", "why": "Backward-compatibility constraint on public exports."}
+{"id": "c83f29b7394", "index": 0, "label": "one_off", "scope": "ok", "why": "Describes one CI caching change."}
+{"id": "c5e5b998791", "index": 0, "label": "durable", "scope": "ok", "why": "Shared action prevents workflow drift."}
+{"id": "c5e5b998791", "index": 1, "label": "durable", "scope": "ok", "why": "Composite actions cannot declare background steps."}
+{"id": "pr8875", "index": 0, "label": "one_off", "scope": "ok", "why": "Feature description; the 'PlainChat' name is not in the text."}
+{"id": "pr8875", "index": 1, "label": "durable", "scope": "ok", "why": "Entitlement gating enabled for all cloud plans, as agreed."}
+{"id": "pr16543", "index": 0, "label": "durable", "scope": "ok", "why": "Nested aggregates in column internal would break ClickHouse."}
+{"id": "pr16543", "index": 1, "label": "durable", "scope": "ok", "why": "Count TOOL spans; tool_calls arrays exist only on GENERATION spans."}
+{"id": "rc4424819399", "index": 0, "label": "durable", "scope": "bad", "why": "Strong reviewer principle; scope is not a locatable path or symbol."}
+{"id": "rc4218967980", "index": 0, "label": "durable", "scope": "ok", "why": "Logging constraint on job identifiers."}
+{"id": "rc4139009329", "index": 0, "label": "durable", "scope": "ok", "why": "Admin-API keys use createdBy system with no member lookup."}
+{"id": "rc4424483889", "index": 0, "label": "durable", "scope": "ok", "why": "Concurrency invariant for create/upsert."}
+{"id": "c2d18e8181a", "index": 0, "label": "durable", "scope": "ok", "why": "Core gap semantics for additive vs non-additive metrics."}
+{"id": "c2d18e8181a", "index": 1, "label": "durable", "scope": "ok", "why": "Default chart behavior is now connectNulls false."}
+{"id": "c2d18e8181a", "index": 2, "label": "durable", "scope": "ok", "why": "Interpolation is now linear instead of monotone smoothing."}
+{"id": "c2d18e8181a", "index": 3, "label": "durable", "scope": "ok", "why": "Isolated points rendered as dots so real data stays visible."}
+{"id": "c2d18e8181a", "index": 4, "label": "durable", "scope": "ok", "why": "Placeholder rows are markers, and the zero form only for additive metrics."}

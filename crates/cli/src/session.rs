@@ -1,6 +1,6 @@
-//! Per-session hook state in `.git/ingrain/sessions/<id>.json`: the files the agent
-//! edited (so the Stop hook only judges the agent's own work, not the human's
-//! uncommitted changes) and how often the turn was already sent back.
+//! Per-session hook state in `.git/ingrain/sessions/<id>.json`: which decisions the agent was
+//! already shown (each is shown once), which files it edited (the Stop hook checks only those,
+//! not the human's own uncommitted work), and how often the turn was sent back.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -10,23 +10,28 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Session {
     #[serde(default)]
+    pub shown: BTreeSet<String>,
+    #[serde(default)]
     pub edited: BTreeSet<String>,
     #[serde(default)]
     pub stop_attempts: u32,
 }
 
 impl Session {
-    pub fn load(dir: &Path, id: &str) -> Result<Self> {
-        let path = file(dir, id);
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        Ok(serde_json::from_str(&std::fs::read_to_string(path)?).unwrap_or_default())
+    pub fn load(dir: &Path, id: &str) -> Self {
+        std::fs::read_to_string(file(dir, id))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
     }
 
+    /// Write then rename, so concurrent hooks never read half a file.
     pub fn save(&self, dir: &Path, id: &str) -> Result<()> {
         std::fs::create_dir_all(dir)?;
-        std::fs::write(file(dir, id), serde_json::to_string(self)?)?;
+        let path = file(dir, id);
+        let tmp = path.with_extension(format!("json.{}", std::process::id()));
+        std::fs::write(&tmp, serde_json::to_string(self)?)?;
+        std::fs::rename(&tmp, &path)?;
         Ok(())
     }
 }
@@ -61,11 +66,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = Session::default();
         s.edited.insert("src/a.ts".into());
+        s.shown.insert("D-0001".into());
         s.stop_attempts = 2;
         s.save(dir.path(), "../../etc/x").unwrap();
         assert!(dir.path().join("______etc_x.json").exists());
-        let back = Session::load(dir.path(), "../../etc/x").unwrap();
+        let back = Session::load(dir.path(), "../../etc/x");
         assert_eq!(back.stop_attempts, 2);
-        assert!(back.edited.contains("src/a.ts"));
+        assert!(back.edited.contains("src/a.ts") && back.shown.contains("D-0001"));
     }
 }

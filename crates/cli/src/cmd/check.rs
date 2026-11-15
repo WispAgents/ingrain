@@ -1,12 +1,14 @@
+//! `ingrain check`: learned rules and decision checks on added lines (pre-commit, CI, by hand).
+
 use super::Outcome;
 use crate::check::{self, Finding};
 use crate::hitlog::{self, Entry, Event};
+use crate::overrides;
 use crate::repo::Repo;
-use crate::session::Session;
-use anyhow::{Context, Result};
+use anyhow::{Result, bail};
 use ingrain_core::{DiffBase, Mode};
+use ingrain_ledger::{Checker, Record, Violation};
 use serde_json::{Value, json};
-use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -15,22 +17,13 @@ pub struct Args {
     /// Files to check (default: every file with added lines).
     paths: Vec<String>,
     /// Check staged changes (pre-commit).
-    #[arg(long, conflicts_with_all = ["diff", "hook"])]
+    #[arg(long, conflicts_with = "diff")]
     staged: bool,
     /// Check added lines in a revision range, e.g. `origin/main...HEAD` (CI).
-    #[arg(long, value_name = "RANGE", conflicts_with = "hook")]
+    #[arg(long, value_name = "RANGE")]
     diff: Option<String>,
-    /// Run as a Claude Code hook: reads the hook JSON on stdin and answers in JSON.
-    #[arg(long, value_enum)]
-    hook: Option<Hook>,
     #[arg(long, value_enum, default_value = "text")]
     format: Format,
-}
-
-#[derive(Clone, Copy, clap::ValueEnum)]
-pub enum Hook {
-    PostEdit,
-    Stop,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -41,28 +34,30 @@ pub enum Format {
 }
 
 pub fn run(dir: &Path, args: Args) -> Outcome {
-    match args.hook {
-        // A hook must never break the agent's session because ingrain failed.
-        Some(hook) => {
-            if let Err(e) = run_hook(dir, hook) {
-                eprintln!("ingrain hook error (ignored): {e:#}");
-            }
-            Ok(ExitCode::SUCCESS)
-        }
-        None => run_cli(dir, args),
-    }
-}
-
-fn run_cli(dir: &Path, args: Args) -> Outcome {
     let repo = Repo::open(dir)?;
     let rules = repo.compiled_rules()?;
     let (base, context) = if args.staged {
         (DiffBase::Staged, "staged")
     } else if let Some(range) = &args.diff {
+        if range.starts_with('-') {
+            bail!("`--diff` takes a revision range, not an option: {range}");
+        }
         (DiffBase::Range(range.clone()), "ci")
     } else {
         (DiffBase::Head, "manual")
     };
+    // Pre-commit and CI judge a change by the decisions it started from, so one change can't
+    // retire a decision and break it. By hand, the working tree's ledger counts.
+    let decisions = match (&base, base.before_rev(&repo.git)) {
+        (DiffBase::Head, _) | (_, None) => repo.ledger.live()?,
+        (_, Some(rev)) => repo.ledger.live_at(&repo.git, &rev)?,
+    };
+    let ledger_changes = if base == DiffBase::Head {
+        Vec::new()
+    } else {
+        ledger_changes(&repo, &base)
+    };
+
     let only: Vec<String> = args
         .paths
         .iter()
@@ -71,10 +66,29 @@ fn run_cli(dir: &Path, args: Args) -> Outcome {
     let targets = check::targets(&repo, &base, (!only.is_empty()).then_some(only.as_slice()))?;
     let findings = check::find(&rules, &targets);
     log(&repo, &findings, context)?;
+    let violations: Vec<Violation> = {
+        let checker = Checker::new(&decisions);
+        repo.decision_targets(&targets, &base)
+            .iter()
+            .flat_map(|t| checker.check(t))
+            .collect()
+    };
+    overrides::log(&repo, &violations)?;
 
     let visible: Vec<&Finding> = findings.iter().filter(|f| f.mode != Mode::Shadow).collect();
+    let broken: Vec<&Violation> = violations
+        .iter()
+        .filter(|v| v.overridden.is_none())
+        .collect();
     match args.format {
-        Format::Json => println!("{}", serde_json::to_string_pretty(&to_json(&findings))?),
+        Format::Json => {
+            let out = json!({
+                "rules": findings.iter().map(finding_json).collect::<Vec<_>>(),
+                "decisions": violations.iter().map(violation_json).collect::<Vec<_>>(),
+                "ledger_changes": ledger_changes,
+            });
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        }
         Format::Github => {
             for f in visible.iter().filter(|f| f.is_active()) {
                 let level = if f.mode == Mode::Block {
@@ -83,11 +97,34 @@ fn run_cli(dir: &Path, args: Args) -> Outcome {
                     "warning"
                 };
                 println!(
-                    "::{level} file={},line={},title=ingrain {}::{}",
-                    f.path,
+                    "::{level} file={},line={},title={}::{}",
+                    escape_property(&f.path),
                     f.line,
-                    f.rule,
-                    escape_gh(&f.message)
+                    escape_property(&format!("ingrain rule {}", f.rule)),
+                    escape(&f.message)
+                );
+            }
+            for v in &broken {
+                println!(
+                    "::error file={},line={},title={}::{}",
+                    escape_property(&v.path),
+                    v.line,
+                    escape_property(&format!("decision {}", v.decision)),
+                    escape(&format!(
+                        "{}. {}",
+                        v.what,
+                        decision_line(&decisions, &v.decision)
+                    ))
+                );
+            }
+            for f in &ledger_changes {
+                println!(
+                    "::notice file={},title={}::{}",
+                    escape_property(f),
+                    escape_property("decision ledger changed"),
+                    escape(
+                        "This change edits the decision ledger; it was checked against the decisions it started from."
+                    )
                 );
             }
         }
@@ -100,15 +137,40 @@ fn run_cli(dir: &Path, args: Args) -> Outcome {
                 };
                 println!("{}:{}  [{tag}] {}  {}", f.path, f.line, f.rule, f.message);
             }
+            for v in &violations {
+                let tag = if v.overridden.is_some() {
+                    " [overridden]"
+                } else {
+                    ""
+                };
+                println!(
+                    "{}:{}  {} {}{tag}: {}",
+                    v.path, v.line, v.decision, v.what, v.code
+                );
+            }
+            for f in &ledger_changes {
+                println!(
+                    "note: this change edits {f}; it was checked against the decisions it started from"
+                );
+            }
             let shadow = findings.len() - visible.len();
             if shadow > 0 {
-                println!("({shadow} shadow-mode hits logged, not shown)");
+                println!("({shadow} shadow-mode rule hits logged, not shown)");
+            }
+            if visible.is_empty() && violations.is_empty() {
+                println!(
+                    "nothing broken ({} files, {} rules, {} decisions with checks)",
+                    targets.len(),
+                    rules.len(),
+                    decisions.iter().filter(|r| !r.checks.is_empty()).count()
+                );
             }
         }
     }
     let blocking = visible
         .iter()
-        .any(|f| f.is_active() && f.mode == Mode::Block);
+        .any(|f| f.is_active() && f.mode == Mode::Block)
+        || !broken.is_empty();
     Ok(if blocking {
         ExitCode::FAILURE
     } else {
@@ -116,101 +178,38 @@ fn run_cli(dir: &Path, args: Args) -> Outcome {
     })
 }
 
-fn run_hook(dir: &Path, hook: Hook) -> Result<()> {
-    let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
-    let payload: Value = if input.trim().is_empty() {
-        json!({})
-    } else {
-        serde_json::from_str(&input)?
-    };
-    let dir = payload["cwd"].as_str().map(Path::new).unwrap_or(dir);
-    let repo = Repo::open(dir)?;
-    let rules = repo.compiled_rules()?;
-    if rules.is_empty() {
-        return Ok(());
-    }
-    let session_id = payload["session_id"].as_str().unwrap_or("default");
-    match hook {
-        Hook::PostEdit => {
-            let file = payload["tool_input"]["file_path"]
-                .as_str()
-                .context("hook input has no tool_input.file_path")?;
-            let rel = repo.git.relative(Path::new(file));
-            let sessions = repo.layout.sessions_dir();
-            let mut state = Session::load(&sessions, session_id)?;
-            if state.edited.insert(rel.clone()) {
-                state.save(&sessions, session_id)?;
-            }
-            let targets = check::targets(&repo, &DiffBase::Head, Some(&[rel]))?;
-            let findings = check::find(&rules, &targets);
-            log(&repo, &findings, "hook")?;
-            let block: Vec<&Finding> = active(&findings, Mode::Block);
-            let warn: Vec<&Finding> = active(&findings, Mode::Warn);
-            if !block.is_empty() {
-                let mut all = block.clone();
-                all.extend(warn);
-                print_json(
-                    &json!({ "decision": "block", "reason": check::agent_message(&all, true) }),
-                );
-            } else if !warn.is_empty() {
-                print_json(&json!({
-                    "hookSpecificOutput": {
-                        "hookEventName": "PostToolUse",
-                        "additionalContext": check::agent_message(&warn, false),
-                    }
-                }));
-            }
-        }
-        Hook::Stop => {
-            let sessions = repo.layout.sessions_dir();
-            let mut state = Session::load(&sessions, session_id)?;
-            // Only the files this session's agent edited; the human's uncommitted work is theirs.
-            let edited: Vec<String> = state.edited.iter().cloned().collect();
-            let targets = if edited.is_empty() {
-                Vec::new()
-            } else {
-                check::targets(&repo, &DiffBase::Head, Some(&edited))?
-            };
-            let findings = check::find(&rules, &targets);
-            let block = active(&findings, Mode::Block);
-            if block.is_empty() {
-                if state.stop_attempts > 0 {
-                    state.stop_attempts = 0;
-                    state.save(&sessions, session_id)?;
-                }
-                return Ok(());
-            }
-            if state.stop_attempts < repo.config.stop_max_attempts {
-                state.stop_attempts += 1;
-                state.save(&sessions, session_id)?;
-                print_json(
-                    &json!({ "decision": "block", "reason": check::agent_message(&block, true) }),
-                );
-            } else {
-                // Let the turn end; record that it ended with violations for the human to see.
-                state.stop_attempts = 0;
-                state.save(&sessions, session_id)?;
-                let unresolved: Vec<Finding> = block.into_iter().cloned().collect();
-                log_event(&repo, &unresolved, "stop", Event::Unresolved)?;
-                eprintln!(
-                    "ingrain: turn ended with {} unresolved rule violations",
-                    unresolved.len()
-                );
-            }
-        }
-    }
-    Ok(())
+/// Ledger files a diff changes, other than proposals.
+fn ledger_changes(repo: &Repo, base: &DiffBase) -> Vec<String> {
+    repo.git
+        .diff(base, Some(ingrain_ledger::record::Ledger::DIR))
+        .map(|files| {
+            files
+                .into_iter()
+                .filter_map(|f| f.new_path.or(f.old_path))
+                .filter(|p| !p.contains("/pending/"))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
-fn active(findings: &[Finding], mode: Mode) -> Vec<&Finding> {
+pub fn decision_line(records: &[Record], id: &str) -> String {
+    records
+        .iter()
+        .find(|r| r.id == id)
+        .map(Record::line)
+        .unwrap_or_else(|| id.to_owned())
+}
+
+/// Rule findings in a given mode that aren't overridden.
+pub fn active(findings: &[Finding], mode: Mode) -> Vec<&Finding> {
     findings
         .iter()
         .filter(|f| f.mode == mode && f.is_active())
         .collect()
 }
 
-fn log(repo: &Repo, findings: &[Finding], context: &str) -> Result<()> {
+/// Log rule hits and overrides to the hit log.
+pub fn log(repo: &Repo, findings: &[Finding], context: &str) -> Result<()> {
     let (overridden, hits): (Vec<Finding>, Vec<Finding>) = findings
         .iter()
         .cloned()
@@ -219,7 +218,7 @@ fn log(repo: &Repo, findings: &[Finding], context: &str) -> Result<()> {
     log_event(repo, &overridden, context, Event::Override)
 }
 
-fn log_event(repo: &Repo, findings: &[Finding], context: &str, event: Event) -> Result<()> {
+pub fn log_event(repo: &Repo, findings: &[Finding], context: &str, event: Event) -> Result<()> {
     let now = hitlog::now();
     let entries: Vec<Entry> = findings
         .iter()
@@ -238,32 +237,37 @@ fn log_event(repo: &Repo, findings: &[Finding], context: &str, event: Event) -> 
     hitlog::append(&repo.layout.hits_file(), &entries)
 }
 
-fn print_json(v: &Value) {
-    println!("{v}");
+fn finding_json(f: &Finding) -> Value {
+    json!({
+        "rule": f.rule,
+        "mode": f.mode.to_string(),
+        "path": f.path,
+        "line": f.line,
+        "message": f.message,
+        "matched": f.matched,
+        "overridden": f.override_reason,
+    })
 }
 
-fn to_json(findings: &[Finding]) -> Value {
-    Value::Array(
-        findings
-            .iter()
-            .map(|f| {
-                json!({
-                    "rule": f.rule,
-                    "mode": f.mode.to_string(),
-                    "path": f.path,
-                    "line": f.line,
-                    "message": f.message,
-                    "matched": f.matched,
-                    "overridden": f.override_reason,
-                })
-            })
-            .collect(),
-    )
+fn violation_json(v: &Violation) -> Value {
+    json!({
+        "decision": v.decision,
+        "path": v.path,
+        "line": v.line,
+        "what": v.what,
+        "code": v.code,
+        "overridden": v.overridden,
+    })
 }
 
 /// GitHub workflow commands treat `%`, CR and LF specially.
-fn escape_gh(s: &str) -> String {
+fn escape(s: &str) -> String {
     s.replace('%', "%25")
         .replace('\r', "%0D")
         .replace('\n', "%0A")
+}
+
+/// Properties (`file=`, `title=`) also need `,` and `:` escaped.
+fn escape_property(s: &str) -> String {
+    escape(s).replace(',', "%2C").replace(':', "%3A")
 }

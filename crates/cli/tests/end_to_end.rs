@@ -166,7 +166,7 @@ fn learns_a_rule_and_enforces_it_everywhere() {
     let out = ingrain(dir, &["check"]);
     assert!(out.status.success());
     assert!(
-        stdout(&out).contains("1 shadow-mode hits logged"),
+        stdout(&out).contains("1 shadow-mode rule hits logged"),
         "{}",
         stdout(&out)
     );
@@ -188,8 +188,9 @@ fn learns_a_rule_and_enforces_it_everywhere() {
     // GitHub annotation format.
     let out = ingrain(dir, &["check", "--format", "github"]);
     assert!(
-        stdout(&out)
-            .starts_with("::error file=src/feature9.ts,line=2,title=ingrain avoid-fetch-call::")
+        stdout(&out).starts_with(
+            "::error file=src/feature9.ts,line=2,title=ingrain rule avoid-fetch-call::"
+        )
     );
 
     // PostToolUse hook answers with a block decision and the past fix.
@@ -200,7 +201,7 @@ fn learns_a_rule_and_enforces_it_everywhere() {
         "tool_input": { "file_path": dir.join(new_file) },
     })
     .to_string();
-    let out = ingrain_stdin(dir, &["check", "--hook", "post-edit"], &payload);
+    let out = ingrain_stdin(dir, &["hook", "post-tool-use"], &payload);
     assert!(out.status.success());
     let answer: Value = serde_json::from_str(&stdout(&out)).expect("hook prints JSON");
     assert_eq!(answer["decision"], "block");
@@ -212,11 +213,11 @@ fn learns_a_rule_and_enforces_it_everywhere() {
     let stop = serde_json::json!({ "session_id": "s1", "cwd": dir, "stop_hook_active": false })
         .to_string();
     for _ in 0..3 {
-        let out = ingrain_stdin(dir, &["check", "--hook", "stop"], &stop);
+        let out = ingrain_stdin(dir, &["hook", "stop"], &stop);
         let answer: Value = serde_json::from_str(&stdout(&out)).unwrap();
         assert_eq!(answer["decision"], "block");
     }
-    let out = ingrain_stdin(dir, &["check", "--hook", "stop"], &stop);
+    let out = ingrain_stdin(dir, &["hook", "stop"], &stop);
     assert_eq!(stdout(&out).trim(), "", "4th stop is let through");
 
     // An override with a reason clears it; without a reason it doesn't.
@@ -299,7 +300,7 @@ fn hook_fails_open_outside_a_repo() {
     let tmp = tempfile::tempdir().unwrap();
     let out = ingrain_stdin(
         tmp.path(),
-        &["check", "--hook", "post-edit"],
+        &["hook", "post-tool-use"],
         "{\"tool_input\":{\"file_path\":\"/x.ts\"}}",
     );
     assert!(out.status.success());
