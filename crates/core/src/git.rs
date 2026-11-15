@@ -130,10 +130,10 @@ impl Git {
             DiffBase::Staged => vec!["--cached"],
             DiffBase::Range(range) => vec!["--end-of-options", range.as_str()],
         };
-        match self.diff_revs(&revs, path) {
+        match self.diff_revs_ignoring_whitespace(&revs, path) {
             // No commits yet: compare the index against the empty tree instead.
             Err(_) if *base == DiffBase::Head && !self.has_head() => {
-                self.diff_revs(&["--cached"], path)
+                self.diff_revs_ignoring_whitespace(&["--cached"], path)
             }
             other => other,
         }
@@ -142,7 +142,27 @@ impl Git {
     /// `git diff -U0` between revisions, with output that doesn't depend on the
     /// user's config: fixed `a/` `b/` prefixes, unquoted paths, renames detected
     /// (so a moved file doesn't count as fully added), no external diff tools.
+    /// Whitespace changes count, so mining sees a fix that wraps and re-indents code.
     pub fn diff_revs(&self, revs: &[&str], path: Option<&str>) -> Result<Vec<FileDiff>> {
+        self.diff_with(revs, path, false)
+    }
+
+    /// Like `diff_revs`, ignoring whitespace: re-indented existing code isn't "added".
+    /// What checks use.
+    fn diff_revs_ignoring_whitespace(
+        &self,
+        revs: &[&str],
+        path: Option<&str>,
+    ) -> Result<Vec<FileDiff>> {
+        self.diff_with(revs, path, true)
+    }
+
+    fn diff_with(
+        &self,
+        revs: &[&str],
+        path: Option<&str>,
+        ignore_whitespace: bool,
+    ) -> Result<Vec<FileDiff>> {
         let mut args = vec![
             "-c",
             "core.quotePath=false",
@@ -150,12 +170,13 @@ impl Git {
             "--no-color",
             "--no-ext-diff",
             "-U0",
-            // Re-indenting existing code isn't adding it.
-            "-w",
             "-M",
             "--src-prefix=a/",
             "--dst-prefix=b/",
         ];
+        if ignore_whitespace {
+            args.push("-w");
+        }
         args.extend_from_slice(revs);
         args.push("--");
         if let Some(p) = path {
@@ -338,6 +359,35 @@ mod tests {
         git(dir.path(), &["mv", "a.ts", "b.ts"]);
         let repo = Git::open(dir.path()).unwrap();
         assert!(repo.added_lines(&DiffBase::Staged).unwrap().is_empty());
+    }
+
+    #[test]
+    fn checks_ignore_reindent_but_mining_sees_it() {
+        let dir = init_repo();
+        std::fs::write(dir.path().join("a.py"), "x = 1\ncall()\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-qm", "init"]);
+        std::fs::write(
+            dir.path().join("a.py"),
+            "x = 1\ntry:\n    call()\nexcept E:\n    pass\n",
+        )
+        .unwrap();
+        git(dir.path(), &["commit", "-qam", "wrap"]);
+        let repo = Git::open(dir.path()).unwrap();
+        // Mining: one hunk that replaces `call()`, so the correction is found.
+        let mined = repo.diff_revs(&["HEAD~1", "HEAD"], None).unwrap();
+        assert!(
+            mined[0]
+                .hunks
+                .iter()
+                .any(|h| h.removed.iter().any(|l| l.contains("call()")))
+        );
+        // Checks: the re-indented `call()` is not an added line.
+        let added = repo
+            .added_lines(&DiffBase::Range("HEAD~1..HEAD".into()))
+            .unwrap();
+        let lines: Vec<u32> = added[0].1.iter().flat_map(|r| r.start..=r.end).collect();
+        assert!(!lines.contains(&3), "{lines:?}");
     }
 
     #[test]

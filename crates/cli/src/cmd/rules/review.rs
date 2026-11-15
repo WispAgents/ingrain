@@ -1,4 +1,4 @@
-use super::Outcome;
+use crate::cmd::Outcome;
 use crate::repo::Repo;
 use anyhow::{Context, Result, bail};
 use ingrain_core::RuleFile;
@@ -82,7 +82,7 @@ pub fn interactive(dir: &Path) -> Outcome {
     let repo = Repo::open(dir)?;
     let pending = repo.pending()?;
     if pending.is_empty() {
-        println!("nothing to review; run `ingrain propose` first");
+        println!("nothing to review; run `ingrain rules propose` first");
         return Ok(ExitCode::SUCCESS);
     }
     let stdin = std::io::stdin();
