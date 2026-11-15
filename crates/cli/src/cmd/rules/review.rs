@@ -6,7 +6,7 @@ use ingrain_engine::CompiledRule;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 /// An entry in `.corrections/rejected.yml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,7 +141,7 @@ pub fn interactive(dir: &Path) -> Outcome {
 /// the `id:`, move the file so its name keeps matching. Returns the (possibly new) id.
 fn edit_pending(repo: &Repo, id: &str) -> Result<String> {
     let path = repo.layout.rule_path(&repo.layout.pending_dir(), id)?;
-    edit(&path)?;
+    ingrain_core::process::edit(&path)?;
     let mut rule = RuleFile::load(&path)?;
     CompiledRule::compile(&rule.to_yaml()).context("the edited rule doesn't compile")?;
     if rule.id != id {
@@ -163,20 +163,6 @@ fn read_line(input: &mut impl BufRead) -> Result<Option<String>> {
         return Ok(None);
     }
     Ok(Some(line.trim().to_owned()))
-}
-
-fn edit(path: &Path) -> Result<()> {
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".into());
-    let status = Command::new(&editor)
-        .arg(path)
-        .status()
-        .with_context(|| format!("starting {editor}"))?;
-    if !status.success() {
-        bail!("{editor} exited with {status}");
-    }
-    Ok(())
 }
 
 /// The review card for one rule.

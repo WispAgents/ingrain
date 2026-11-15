@@ -5,7 +5,7 @@ use ingrain_core::{Correction, store};
 use ingrain_learn::agents::Classifier;
 use ingrain_learn::capture::{self, git::GitMineOptions};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -134,7 +134,7 @@ fn default_projects_dir() -> Option<PathBuf> {
 }
 
 fn detect_github(root: &Path) -> Result<String> {
-    let out = Command::new("gh")
+    let out = ingrain_core::process::command("gh")
         .args([
             "repo",
             "view",

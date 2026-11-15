@@ -12,17 +12,13 @@ fn bin_dir(tmp: &Path) -> PathBuf {
     dir
 }
 
-fn path_env(tmp: &Path) -> String {
-    let own = Path::new(env!("CARGO_BIN_EXE_ingrain"))
-        .parent()
-        .unwrap()
-        .display()
-        .to_string();
-    format!(
-        "{}:{own}:{}",
-        bin_dir(tmp).display(),
-        std::env::var("PATH").unwrap_or_default()
-    )
+fn path_env(tmp: &Path) -> std::ffi::OsString {
+    let own = Path::new(env!("CARGO_BIN_EXE_ingrain")).parent().unwrap();
+    let rest = std::env::var_os("PATH").unwrap_or_default();
+    let paths = [bin_dir(tmp), own.to_path_buf()]
+        .into_iter()
+        .chain(std::env::split_paths(&rest));
+    std::env::join_paths(paths).unwrap()
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -265,14 +261,45 @@ fn extract_proposes_and_review_remembers_rejections() {
         ],
     );
 
-    // A fake `claude` that answers every extraction call the same way.
-    let fake = bin_dir(dir).join("claude");
-    let reply = r#"{"results":[{"id":"ANY","records":[{"decision":"Render buttons with the @acme/ds Button, not raw <button>.","reason":"raw buttons drift from the theme","scope":["src/**"],"category":"convention"}]}]}"#;
-    std::fs::write(&fake, format!("#!/bin/sh\ncat >/dev/null\nsed \"s/ANY/$(git -C '{}' log -1 --format=%H | cut -c1-12 | sed 's/^/c/')/\" <<'EOF'\n{reply}\nEOF\n", dir.display())).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // A fake `claude` that answers every extraction call the same way: a shell script, or a
+    // .cmd file on Windows (which also exercises finding `claude.cmd` on PATH).
+    let reply_file = bin_dir(dir).join("reply.json");
+    // The reply names the newest commit, the text extraction sends.
+    let answer_for_head = || {
+        let head = Command::new("git")
+            .args(["log", "-1", "--format=%H"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        let text_id = format!("c{}", &String::from_utf8_lossy(&head.stdout)[..12]);
+        let reply = r#"{"results":[{"id":"ANY","records":[{"decision":"Render buttons with the @acme/ds Button, not raw <button>.","reason":"raw buttons drift from the theme","scope":["src/**"],"category":"convention"}]}]}"#;
+        std::fs::write(&reply_file, reply.replace("ANY", &text_id)).unwrap();
+    };
+    answer_for_head();
+    if cfg!(windows) {
+        std::fs::write(
+            bin_dir(dir).join("claude.cmd"),
+            format!(
+                "@echo off\r\nmore >nul\r\ntype \"{}\"\r\n",
+                reply_file.display()
+            ),
+        )
+        .unwrap();
+    } else {
+        let fake = bin_dir(dir).join("claude");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\ncat >/dev/null\ncat '{}'\n",
+                reply_file.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     let out = ok(
@@ -344,6 +371,7 @@ fn extract_proposes_and_review_remembers_rejections() {
             "ui: more buttons from the design system\n\nAgain: all buttons come from @acme/ds, never hand-rolled button elements.",
         ],
     );
+    answer_for_head();
     let out = extract(dir);
     assert!(
         out.contains("0 proposals") && out.contains("1 duplicates"),

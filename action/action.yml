@@ -6,7 +6,7 @@ inputs:
     default: ${{ github.event.pull_request.base.sha }}
   version:
     description: Release of WispAgents/ingrain to use.
-    default: v0.2.1
+    default: v0.2.2
 runs:
   using: composite
   steps:
@@ -18,12 +18,20 @@ runs:
           Linux-ARM64) target=aarch64-unknown-linux-gnu ;;
           macOS-X64) target=x86_64-apple-darwin ;;
           macOS-ARM64) target=aarch64-apple-darwin ;;
+          Windows-X64) target=x86_64-pc-windows-msvc ;;
+          Windows-ARM64) target=aarch64-pc-windows-msvc ;;
           *) echo "unsupported runner $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
         esac
-        url="https://github.com/WispAgents/ingrain/releases/download/${{ inputs.version }}/ingrain-${{ inputs.version }}-$target.tar.gz"
-        mkdir -p "$RUNNER_TEMP/ingrain"
-        curl -fsSL "$url" | tar -xz -C "$RUNNER_TEMP/ingrain"
-        echo "$RUNNER_TEMP/ingrain" >> "$GITHUB_PATH"
+        base="https://github.com/WispAgents/ingrain/releases/download/${{ inputs.version }}/ingrain-${{ inputs.version }}-$target"
+        dir="$RUNNER_TEMP/ingrain"
+        mkdir -p "$dir"
+        if [ "$RUNNER_OS" = Windows ]; then
+          curl -fsSL "$base.zip" -o "$dir/ingrain.zip"
+          pwsh -NoProfile -Command "Expand-Archive -Force -Path '$dir/ingrain.zip' -DestinationPath '$dir'"
+        else
+          curl -fsSL "$base.tar.gz" | tar -xz -C "$dir"
+        fi
+        echo "$dir" >> "$GITHUB_PATH"
     - name: Check added lines
       shell: bash
       run: ingrain check --diff "${{ inputs.base }}...HEAD" --format github

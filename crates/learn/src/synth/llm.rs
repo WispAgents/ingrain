@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 /// Default model for rule writing.
@@ -24,7 +24,7 @@ impl Llm for ClaudeCli {
     fn complete(&self, prompt: &str) -> Result<String> {
         // A fresh empty directory: no project CLAUDE.md, settings or hooks get loaded.
         let dir = tempfile::tempdir().context("creating a temp dir for claude")?;
-        let mut child = Command::new("claude")
+        let mut child = ingrain_core::process::command("claude")
             .args([
                 "-p",
                 "--tools",
@@ -149,6 +149,5 @@ pub fn backend(name: &str, model: Option<&str>) -> Result<Option<Box<dyn Llm>>> 
 }
 
 fn which(bin: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(bin).is_file()))
+    ingrain_core::process::find(bin).is_some()
 }

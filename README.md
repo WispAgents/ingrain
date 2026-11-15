@@ -21,11 +21,15 @@ Nothing becomes a rule without a person accepting it.
 ## Install
 
 ```sh
-brew install wispagents/tap/ingrain
-# or a prebuilt binary from https://github.com/WispAgents/ingrain/releases
-# or from source:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.1 ingrain
+brew install wispagents/tap/ingrain   # macOS and Linux
+# or from source, any OS:
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.2 ingrain
 ```
+
+Prebuilt binaries for macOS, Linux and Windows (x64 and arm64) are on the
+[releases page](https://github.com/WispAgents/ingrain/releases/latest). On Windows, unzip
+`ingrain.exe` into a folder on your `PATH`. Claude Code runs hooks through Git Bash there, and
+Git for Windows runs the pre-commit hook, so both work as on macOS and Linux.
 
 Needs `git`. Optional: `gh` (logged in) to read GitHub PRs, reviews and issues; Claude Code
 (`claude`) or `ANTHROPIC_API_KEY` for extraction and for rules templates can't express.
@@ -201,7 +205,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.2.1
+      - uses: WispAgents/ingrain/action@v0.2.2
 ```
 
 ## Layout
