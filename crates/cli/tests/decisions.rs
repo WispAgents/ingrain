@@ -1238,3 +1238,247 @@ fn unstaging_and_upgrades_dont_block() {
     std::fs::write(&file, session.to_string()).unwrap();
     assert!(hook(dir, "post-tool-use", ls).is_none(), "legacy snapshot");
 }
+
+/// Moving to history that already exists (checkout, merge, rebase, pull, stash) brings in
+/// decisions people already reviewed: not reported. Rewinding the branch, a conflict the
+/// agent resolved, and a new commit dropping a decision still are.
+#[test]
+fn moving_through_existing_history_is_not_tampering() {
+    let tmp = repo();
+    let dir = tmp.path();
+    // A branch from before ingrain, merged long ago: it has no decisions.
+    git(dir, &["branch", "old"]);
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    // Elsewhere, a person changed the decision and added one.
+    git(dir, &["checkout", "-qb", "team"]);
+    let path = dir.join("decisions/D-0001.yml");
+    let record = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        record.replace("No axios in src.", "No axios anywhere."),
+    )
+    .unwrap();
+    ok(
+        dir,
+        &["add", "No lodash in src.", "--forbid-import", "lodash"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "team decisions"]);
+    git(dir, &["checkout", "-q", "main"]);
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 2;\n").unwrap();
+    git(dir, &["commit", "-qam", "main work"]);
+
+    let n = std::cell::Cell::new(0);
+    let run_hooked = |cwd: &Path, command: &str, args: &[&[&str]]| -> Option<Value> {
+        n.set(n.get() + 1);
+        let payload = json!({"session_id": "m", "cwd": cwd, "tool_name": "Bash",
+            "tool_use_id": format!("m{}", n.get()), "tool_input": {"command": command}});
+        assert_eq!(
+            decision_of(hook(cwd, "pre-tool-use", payload.clone())),
+            "",
+            "{command}"
+        );
+        for a in args {
+            git(cwd, a);
+        }
+        hook(cwd, "post-tool-use", payload)
+    };
+    let fine = |cwd: &Path, command: &str, args: &[&[&str]]| {
+        assert!(run_hooked(cwd, command, args).is_none(), "{command}");
+    };
+    let blocked = |cwd: &Path, command: &str, args: &[&[&str]]| {
+        let after = run_hooked(cwd, command, args).unwrap_or_else(|| panic!("{command}"));
+        assert_eq!(after["decision"], "block", "{command}");
+    };
+
+    fine(dir, "git checkout team", &[&["checkout", "-q", "team"]]);
+    fine(dir, "git checkout main", &[&["checkout", "-q", "main"]]);
+    fine(dir, "git checkout old", &[&["checkout", "-q", "old"]]);
+    fine(dir, "git checkout main", &[&["checkout", "-q", "main"]]);
+    // A merge commit that brings in the team's decisions.
+    fine(
+        dir,
+        "git merge --no-edit team",
+        &[&["merge", "-q", "--no-edit", "team"]],
+    );
+    git(dir, &["reset", "-q", "--hard", "HEAD~1"]);
+    // A rebase onto the team's branch.
+    git(dir, &["checkout", "-qb", "feature", "main"]);
+    fine(dir, "git rebase team", &[&["rebase", "-q", "team"]]);
+    git(dir, &["checkout", "-q", "main"]);
+    // A fast-forward.
+    git(dir, &["checkout", "-qb", "ff", "main"]);
+    git(dir, &["reset", "-q", "--hard", "main~1"]);
+    fine(
+        dir,
+        "git merge --ff-only main",
+        &[&["merge", "-q", "--ff-only", "main"]],
+    );
+    git(dir, &["checkout", "-q", "main"]);
+
+    // A pull from a clone where the team pushed.
+    let other = tempfile::tempdir().unwrap();
+    git(other.path(), &["clone", "-q", dir.to_str().unwrap(), "c"]);
+    let c = other.path().join("c");
+    git(&c, &["config", "user.email", "dev@example.com"]);
+    git(&c, &["config", "user.name", "Dev"]);
+    git(&c, &["reset", "-q", "--hard", "HEAD~1"]);
+    fine(&c, "git pull --ff-only", &[&["pull", "-q", "--ff-only"]]);
+
+    // The person's dirty edit, stashed and popped.
+    std::fs::write(&path, format!("{record}# the person's edit\n")).unwrap();
+    fine(dir, "git stash", &[&["stash", "-q"]]);
+    fine(dir, "git stash pop", &[&["stash", "pop", "-q"]]);
+    git(dir, &["checkout", "-q", "--", "decisions/D-0001.yml"]);
+
+    // Still reported: rewinding the branch past a decision.
+    git(dir, &["merge", "-q", "--no-edit", "team"]);
+    blocked(
+        dir,
+        "git reset --hard HEAD~1",
+        &[&["reset", "-q", "--hard", "HEAD~1"]],
+    );
+    git(dir, &["reset", "-q", "--hard", "ORIG_HEAD"]);
+    // A conflict the agent resolved by hand.
+    git(dir, &["checkout", "-qb", "mine", "main~1"]);
+    std::fs::write(&path, record.replace("No axios in src.", "Axios is fine.")).unwrap();
+    git(dir, &["commit", "-qam", "mine", "--no-verify"]);
+    let resolve = || {
+        let out = Command::new("git")
+            .args(["merge", "-q", "--no-edit", "team"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "conflicts");
+        std::fs::write(
+            &path,
+            record.replace("No axios in src.", "Axios when needed."),
+        )
+        .unwrap();
+    };
+    {
+        n.set(n.get() + 1);
+        let payload = json!({"session_id": "m", "cwd": dir, "tool_name": "Bash",
+            "tool_use_id": format!("m{}", n.get()),
+            "tool_input": {"command": "git merge team; git add -A; git commit --no-edit"}});
+        hook(dir, "pre-tool-use", payload.clone());
+        resolve();
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-q", "--no-edit", "--no-verify"]);
+        let after = hook(dir, "post-tool-use", payload).expect("resolved conflict reported");
+        assert_eq!(after["decision"], "block");
+    }
+    git(dir, &["checkout", "-q", "main"]);
+    // A new commit that drops a decision, though an old branch never had it.
+    blocked(
+        dir,
+        "f=decisions/D-0001.yml; git rm -q $f; git commit -qm x",
+        &[
+            &["rm", "-q", "decisions/D-0001.yml"],
+            &["commit", "-qm", "x", "--no-verify"],
+        ],
+    );
+}
+
+/// From review of the history rule: what it must not excuse, and moves it must.
+#[test]
+fn history_rule_edges() {
+    let tmp = repo();
+    let dir = tmp.path();
+    git(dir, &["branch", "old"]);
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    git(dir, &["tag", "-a", "-m", "v1", "v1"]);
+    let path = dir.join("decisions/D-0001.yml");
+    let record = std::fs::read_to_string(&path).unwrap();
+    // A bare remote the team pushes to.
+    let remote = tempfile::tempdir().unwrap();
+    let bare = remote.path().join("r.git");
+    git(remote.path(), &["init", "-q", "--bare", "r.git"]);
+    git(dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(dir, &["push", "-q", "origin", "main"]);
+
+    let n = std::cell::Cell::new(0);
+    let run_hooked = |command: &str, steps: &dyn Fn()| -> Option<Value> {
+        n.set(n.get() + 1);
+        let payload = json!({"session_id": "e", "cwd": dir, "tool_name": "Bash",
+            "tool_use_id": format!("e{}", n.get()), "tool_input": {"command": command}});
+        hook(dir, "pre-tool-use", payload.clone());
+        steps();
+        hook(dir, "post-tool-use", payload)
+    };
+    let blocked = |command: &str, steps: &dyn Fn()| {
+        let after = run_hooked(command, steps).unwrap_or_else(|| panic!("{command}"));
+        assert_eq!(after["decision"], "block", "{command}");
+    };
+    let fine = |command: &str, steps: &dyn Fn()| {
+        assert!(run_hooked(command, steps).is_none(), "{command}");
+    };
+
+    // New content, committed and pushed in one command.
+    blocked(
+        "sh edit.sh && git commit -qam x && git push -q origin main",
+        &|| {
+            std::fs::write(&path, record.replace("axios", "AXIOS")).unwrap();
+            git(dir, &["commit", "-qam", "x", "--no-verify"]);
+            git(dir, &["push", "-q", "origin", "main"]);
+        },
+    );
+    git(dir, &["push", "-qf", "origin", "main~1:main"]);
+    git(dir, &["reset", "-q", "--hard", "main~1"]);
+
+    // The person's uncommitted edit, thrown away.
+    std::fs::write(&path, format!("{record}# the person's edit\n")).unwrap();
+    blocked("git reset --hard", &|| git(dir, &["reset", "-q", "--hard"]));
+    std::fs::write(&path, format!("{record}# the person's edit\n")).unwrap();
+    blocked("git stash && git stash drop", &|| {
+        git(dir, &["stash", "-q"]);
+        git(dir, &["stash", "drop", "-q"]);
+    });
+    // The person's new decision, untracked, cleaned away.
+    std::fs::write(dir.join("decisions/D-0009.yml"), "id: D-0009\n").unwrap();
+    blocked("git clean -fd", &|| git(dir, &["clean", "-qfd"]));
+
+    // Rewinding main from a detached HEAD.
+    git(dir, &["checkout", "-q", "--detach"]);
+    blocked("git checkout -B main old", &|| {
+        git(dir, &["checkout", "-qB", "main", "old"])
+    });
+    git(dir, &["reset", "-q", "--hard", "v1"]);
+
+    // Moves that are fine: an annotated tag, a fork-style PR fetch, stash -u and pop.
+    git(dir, &["checkout", "-qb", "side", "old"]);
+    fine("git rebase v1", &|| git(dir, &["rebase", "-q", "v1"]));
+    git(dir, &["checkout", "-q", "main"]);
+    let team = tempfile::tempdir().unwrap();
+    git(team.path(), &["clone", "-q", bare.to_str().unwrap(), "t"]);
+    let t = team.path().join("t");
+    git(&t, &["config", "user.email", "dev@example.com"]);
+    git(&t, &["config", "user.name", "Dev"]);
+    std::fs::write(
+        t.join("decisions/D-0001.yml"),
+        record.replace("in src", "in the repo"),
+    )
+    .unwrap();
+    git(&t, &["commit", "-qam", "team"]);
+    git(&t, &["push", "-q", "origin", "HEAD:refs/heads/pr"]);
+    fine("git fetch origin pr:pr && git checkout pr", &|| {
+        git(dir, &["fetch", "-q", "origin", "pr:pr"]);
+        git(dir, &["checkout", "-q", "pr"]);
+    });
+    git(dir, &["checkout", "-q", "main"]);
+    std::fs::write(dir.join("decisions/D-0009.yml"), "id: D-0009\n").unwrap();
+    fine("git stash -u", &|| git(dir, &["stash", "-qu"]));
+    fine("git stash pop", &|| git(dir, &["stash", "pop", "-q"]));
+}

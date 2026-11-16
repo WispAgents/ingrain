@@ -36,6 +36,14 @@ pub struct BashSnapshot {
     /// from an older ingrain, whose stamps can't be compared either.
     #[serde(default)]
     pub staged: Option<BTreeMap<String, String>>,
+    /// Commits every ref pointed at before the command, and the branch `HEAD` was on: to tell
+    /// a move through existing history (checkout, merge, rebase, pull) from new content.
+    #[serde(default)]
+    pub tips: Option<Vec<String>>,
+    #[serde(default)]
+    pub stash: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 impl Session {

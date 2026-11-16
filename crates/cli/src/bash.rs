@@ -871,6 +871,106 @@ pub fn staged_reviewed(git: &Git) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// What every ref points at, as `<commit> <refname>` lines (annotated tags peeled), and the
+/// stash.
+pub fn tips(git: &Git) -> (Vec<String>, Option<String>) {
+    let out = git
+        .try_run(&[
+            "for-each-ref",
+            "--format=%(objectname) %(*objectname) %(refname)",
+        ])
+        .unwrap_or_default();
+    let mut tips = Vec::new();
+    let mut stash = None;
+    for line in out.lines() {
+        let parts: Vec<&str> = line.split(' ').filter(|p| !p.is_empty()).collect();
+        let (sha, name) = match parts.as_slice() {
+            [_, peeled, name] => (*peeled, *name),
+            [sha, name] => (*sha, *name),
+            _ => continue,
+        };
+        if name == "refs/stash" {
+            stash = Some(sha.to_owned());
+        }
+        tips.push(format!("{sha} {name}"));
+    }
+    (tips, stash)
+}
+
+/// `tips` lines as refname to commit.
+pub fn parse_tips(lines: &[String]) -> BTreeMap<String, String> {
+    lines
+        .iter()
+        .filter_map(|l| l.split_once(' '))
+        .map(|(sha, name)| (name.to_owned(), sha.to_owned()))
+        .collect()
+}
+
+/// The ref's newest reflog entry says it was fetched (`fetch`, `pull`), not pushed or set.
+pub fn fetched(git: &Git, name: &str) -> bool {
+    git.try_run(&["reflog", "show", "-1", "--format=%gs", name, "--"])
+        .is_some_and(|m| {
+            let m = m.trim_start();
+            m.starts_with("fetch") || m.starts_with("pull")
+        })
+}
+
+/// The branch `HEAD` is on, if any.
+pub fn branch(git: &Git) -> Option<String> {
+    git.try_run(&["symbolic-ref", "-q", "HEAD"])
+        .map(|s| s.trim().to_owned())
+}
+
+/// The blob of `path` in `commit`, `None` if it isn't there.
+pub fn blob_at(git: &Git, commit: &str, path: &str) -> Option<String> {
+    git.try_run(&["rev-parse", "--verify", "-q", &format!("{commit}:{path}")])
+        .map(|s| s.trim().to_owned())
+}
+
+/// The blob `path` on disk would be (`git hash-object`, with the repo's filters).
+pub fn blob_on_disk(git: &Git, path: &str) -> Option<String> {
+    git.root().join(path).is_file().then(|| {
+        git.try_run(&["hash-object", "--", path])
+            .map(|s| s.trim().to_owned())
+    })?
+}
+
+/// Commits reachable from `from` but not from any of `not` (at most `limit`). `not` goes on
+/// stdin: a repo can have thousands of refs, more than a command line holds on Windows.
+pub fn new_commits(git: &Git, from: &str, not: &[&str], limit: usize) -> Option<Vec<String>> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("git")
+        .args(["rev-list", &format!("--max-count={limit}"), from, "--stdin"])
+        .current_dir(git.root())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdin = child.stdin.take()?;
+    // `^<commit>` excludes it; a `--not` on the command line doesn't reach stdin.
+    let input: String = not.iter().map(|c| format!("^{c}\n")).collect();
+    // Written from another thread so a full stdout pipe can't deadlock us.
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let out = child.wait_with_output().ok()?;
+    let _ = writer.join();
+    out.status.success().then(|| {
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
+/// A pseudo-ref (`MERGE_HEAD`) as a commit.
+pub fn head_named(git: &Git, name: &str) -> Option<String> {
+    git.try_run(&["rev-parse", "--verify", "-q", &format!("{name}^{{commit}}")])
+        .map(|s| s.trim().to_owned())
+}
+
 /// Files in the index.
 pub fn tracked(git: &Git) -> Vec<String> {
     git.try_run(&["ls-files", "-z"])
