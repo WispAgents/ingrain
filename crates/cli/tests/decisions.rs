@@ -1190,3 +1190,51 @@ fn partly_staged_files_and_index_only_changes() {
     let after = hook(dir, "post-tool-use", sneaky).expect("reported");
     assert_eq!(after["decision"], "block");
 }
+
+/// From the last review: unstaging the person's staged decision edit isn't tampering, and a
+/// snapshot written by an older ingrain (upgraded mid-command) doesn't block.
+#[test]
+fn unstaging_and_upgrades_dont_block() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    let bash = |id: &str, command: &str| {
+        json!({"session_id": "u", "cwd": dir, "tool_name": "Bash", "tool_use_id": id,
+            "tool_input": {"command": command}})
+    };
+    let path = dir.join("decisions/D-0001.yml");
+    let record = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{record}# the person's edit\n")).unwrap();
+    git(dir, &["add", "decisions/D-0001.yml"]);
+    let reset = bash("u1", "git reset -q");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", reset.clone())), "");
+    git(dir, &["reset", "-q"]);
+    assert!(hook(dir, "post-tool-use", reset).is_none(), "unstaged");
+
+    // An older ingrain's snapshot: no `staged`, stamps without hashes.
+    let ls = bash("u2", "ls");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", ls.clone())), "");
+    let file = dir.join(".git/ingrain/sessions/u.json");
+    let mut session: Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let snap = &mut session["bash"]["u2"];
+    snap.as_object_mut().unwrap().remove("staged");
+    for (_, stamp) in snap["files"].as_object_mut().unwrap() {
+        let old = stamp
+            .as_str()
+            .unwrap()
+            .rsplitn(2, ':')
+            .last()
+            .unwrap()
+            .to_owned();
+        *stamp = Value::String(old);
+    }
+    std::fs::write(&file, session.to_string()).unwrap();
+    assert!(hook(dir, "post-tool-use", ls).is_none(), "legacy snapshot");
+}

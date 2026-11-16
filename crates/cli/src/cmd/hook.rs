@@ -145,7 +145,7 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
                     files: bash::snapshot(&repo.git),
                     asked: bash_ask.is_some() || first_setup,
                     head: bash::head(&repo.git),
-                    staged: bash::staged_reviewed(&repo.git),
+                    staged: Some(bash::staged_reviewed(&repo.git)),
                 };
                 session.bash.insert(id.clone(), snap);
             }
@@ -169,8 +169,8 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
 
 const SETUP_HINT: &str = " ingrain is being set up in this repository (no decision is committed \
      yet), so `ingrain decisions accept|reject` and `git add` / `git commit` of the setup go \
-     through without asking when run as their own command: no `cd`, `--repo`, variables, or \
-     other programs in the same call. Run them that way.";
+     through without asking when run as their own command: no `cd` elsewhere, `--repo`, \
+     variables, or other programs in the same call. Run them that way.";
 
 /// No decision, rule or ingrain config was ever committed: ingrain is being set up. The
 /// repository's history (every ref, so other branches and worktrees count) is read, not just
@@ -387,6 +387,10 @@ fn post_tool_use(
         // stamped with a content hash, so keeping the size and mtime doesn't hide an edit.
         // A commit must also hold what was on disk, not something staged around it
         // (`git apply --cached`).
+        // A snapshot from an older ingrain (upgraded mid-command) has no index and other
+        // stamps: nothing can be compared, so let this one command pass.
+        let legacy = before.staged.is_none();
+        let staged_before = before.staged.clone().unwrap_or_default();
         let recorded = |p: &str| {
             let Some(was) = before.files.get(p) else {
                 return false;
@@ -404,26 +408,38 @@ fn post_tool_use(
                         .map(|b| b.trim().to_owned());
                     match committed {
                         Some(blob) => {
-                            before.staged.get(p) == Some(&blob)
+                            staged_before.get(p) == Some(&blob)
                                 || repo
                                     .git
                                     .show(head, p)
                                     .is_some_and(|text| bash::stamp_holds(was, text.as_bytes()))
                         }
-                        None => was == "deleted" || !before.staged.contains_key(p),
+                        None => was == "deleted" || !staged_before.contains_key(p),
                     }
                 })
         };
         // The index too (`git update-index`, `git apply --cached`, `git rm --cached`): a staged
         // change counts unless it stages what is on disk, as it was (`git add`).
         let staged_now = bash::staged_reviewed(&repo.git);
-        let restaged: Vec<String> = before
-            .staged
+        let restaged: Vec<String> = staged_before
             .keys()
             .chain(staged_now.keys())
-            .filter(|p| before.staged.get(*p) != staged_now.get(*p))
+            .filter(|p| staged_before.get(*p) != staged_now.get(*p))
             .cloned()
             .collect();
+        // Unstaged back to what is committed (`git reset`, `git restore --staged`).
+        let unstaged = |p: &str| {
+            let head_blob = now_head.as_deref().and_then(|head| {
+                repo.git
+                    .try_run(&["rev-parse", "--verify", "-q", &format!("{head}:{p}")])
+                    .map(|b| b.trim().to_owned())
+            });
+            staged_now.get(p) == head_blob.as_ref()
+                && before
+                    .files
+                    .get(p)
+                    .is_none_or(|was| *was == bash::stamp_of(&repo.git, p))
+        };
         let staged_as_on_disk = |p: &str| {
             before.files.get(p).is_some_and(|was| {
                 *was == bash::stamp_of(&repo.git, p)
@@ -439,9 +455,12 @@ fn post_tool_use(
             .filter(|p| !recorded(p))
             .collect();
         for p in &restaged {
-            if !moved_head && !staged_as_on_disk(p) && !reviewed.contains(&p) {
+            if !moved_head && !staged_as_on_disk(p) && !unstaged(p) && !reviewed.contains(&p) {
                 reviewed.push(p);
             }
+        }
+        if legacy {
+            reviewed.clear();
         }
         if !before.asked && !reviewed.is_empty() {
             // The person may have edited it meanwhile, so don't tell the agent to restore it.

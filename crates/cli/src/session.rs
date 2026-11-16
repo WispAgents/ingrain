@@ -32,9 +32,10 @@ pub struct BashSnapshot {
     /// `HEAD` before the command, to see commits it made or undid.
     #[serde(default)]
     pub head: Option<String>,
-    /// Staged blob of each reviewed file in the index before the command.
+    /// Staged blob of each reviewed file in the index before the command. `None` in a snapshot
+    /// from an older ingrain, whose stamps can't be compared either.
     #[serde(default)]
-    pub staged: BTreeMap<String, String>,
+    pub staged: Option<BTreeMap<String, String>>,
 }
 
 impl Session {

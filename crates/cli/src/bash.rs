@@ -73,6 +73,26 @@ pub fn needs_approval(command: &str) -> Option<String> {
             return Some(why);
         }
     }
+    // `cd .git && rm -rf ingrain`: a write from inside the git directory.
+    let mut in_git_dir = false;
+    for seg in &segments {
+        let program = seg.words.first().map_or("", |w| base_name(w));
+        if matches!(program, "cd" | "pushd") {
+            in_git_dir = seg.words.get(1).is_some_and(|d| {
+                let d = d.replace('\\', "/");
+                let d = d.trim_start_matches("./");
+                d == ".git"
+                    || d.starts_with(".git/")
+                    || d.ends_with("/.git")
+                    || d.contains("/.git/")
+            });
+        } else if in_git_dir && !program.is_empty() && !reads_only(program, &seg.words) {
+            return hides_ledger_history(&Segment {
+                words: vec!["rm".into(), ".git".into()],
+                ..Segment::default()
+            });
+        }
+    }
     // A command substitution inside quotes isn't split out; don't trust it near reviewed paths.
     let lower = command.to_lowercase();
     let substitution = has_substitution(command)
@@ -203,15 +223,18 @@ pub fn setup_command(command: &str, root: &Path) -> bool {
             .is_some_and(|(name, _)| !name.to_ascii_uppercase().starts_with("GIT_"))
     };
     let root_dir = std::fs::canonicalize(root).ok();
+    // Backticks in a single-quoted message are text.
+    let runs_substitution = has_substitution(command);
     let segments = lex(command);
     !segments.is_empty()
         && segments.iter().all(|seg| {
             let skip = commit_message_values(&seg.words);
             // A substitution in a commit message runs too: it must be a setup command itself.
-            let messages_ok = skip
-                .iter()
-                .filter_map(|i| seg.words.get(*i))
-                .all(|m| !(m.contains("$(") || m.contains('`')) || setup_command(m, root));
+            let messages_ok = !runs_substitution
+                || skip
+                    .iter()
+                    .filter_map(|i| seg.words.get(*i))
+                    .all(|m| !(m.contains("$(") || m.contains('`')) || setup_command(m, root));
             let args: Vec<&String> = seg
                 .words
                 .iter()
@@ -273,6 +296,7 @@ pub fn setup_command(command: &str, root: &Path) -> bool {
                     }
                     _ => false,
                 },
+                "pushd" | "popd" => false,
                 "mkdir" => rest.iter().all(|w| w.starts_with('-') || inside(w)),
                 "tee" => rest.iter().all(|w| {
                     w.starts_with('-')
@@ -296,34 +320,60 @@ pub fn setup_command(command: &str, root: &Path) -> bool {
 /// with `update-ref -d`.
 fn hides_ledger_history(seg: &Segment) -> Option<String> {
     let program = seg.words.first().map_or("", |w| base_name(w));
-    // Any write naming the git directory: `rm -rf .git/ingrai*`, `mv .git x`, `cd .git`.
-    let names_git_dir = |w: &String| {
-        let w = w.replace('\\', "/");
-        let w = w.trim_end_matches('/');
-        w == ".git" || w.ends_with("/.git") || w.starts_with(".git/") || w.contains("/.git/")
+    // Where git keeps what proves a ledger was committed: ingrain's marker, reflogs, refs.
+    let history = |w: &String| {
+        let w = w.replace('\\', "/").replace("/./", "/");
+        let w = w.strip_prefix("./").unwrap_or(&w);
+        [".git/ingrai", ".git/logs", ".git/refs", ".git/packed-refs"]
+            .iter()
+            .any(|p| w.starts_with(p) || w.contains(&format!("/{p}")))
     };
-    let git_dir = seg
-        .words
-        .iter()
-        .skip(1)
-        .chain(&seg.redirects)
-        .any(names_git_dir)
-        && program != "git"
-        && (matches!(program, "cd" | "pushd")
-            || !(READ_ONLY.contains(&program) && !writes_with(program, &seg.words)));
+    let writes = !(READ_ONLY.contains(&program) && !writes_with(program, &seg.words));
+    let names = seg.words.iter().skip(1).any(history) && writes && program != "git";
+    // Redirects write whatever the program is.
+    let redirected = seg.redirects.iter().any(history);
+    // The repository's own git directory, removed or moved away.
+    let whole = matches!(program, "rm" | "mv" | "rmdir")
+        && seg
+            .words
+            .iter()
+            .skip(1)
+            .any(|w| matches!(w.trim_end_matches('/'), ".git" | "./.git"));
     let git = program == "git" && {
         let (sub, rest) = git_subcommand(&seg.words);
+        let globals = &seg.words[1..seg.words.len() - rest.len()];
         match sub {
             Some("reflog") => rest
                 .first()
                 .is_some_and(|w| matches!(w.as_str(), "expire" | "delete")),
-            Some("update-ref" | "gc" | "prune" | "replace" | "filter-branch") => true,
-            // Pushing to the repository itself can delete its refs.
-            Some("push") => rest.iter().any(|w| w == "."),
+            Some("update-ref") => rest.iter().any(|w| {
+                w == "-d" || w == "--stdin" || (w.len() >= 40 && w.chars().all(|c| c == '0'))
+            }),
+            Some("gc") => {
+                rest.iter().any(|w| w.starts_with("--prune"))
+                    || globals
+                        .iter()
+                        .any(|w| w.to_ascii_lowercase().contains("expire"))
+            }
+            Some("prune") => true,
+            // Pushing to the repository itself can delete or rewind its refs.
+            Some("push") => {
+                rest.iter().any(|w| w == ".")
+                    && rest.iter().any(|w| {
+                        w.starts_with(':')
+                            || w.starts_with('+')
+                            || w == "-d"
+                            || w == "-f"
+                            || w.starts_with("--delete")
+                            || w.starts_with("--force")
+                            || w.starts_with("--mirror")
+                            || w.starts_with("--prune")
+                    })
+            }
             _ => false,
         }
     };
-    (git_dir || git).then(|| {
+    (names || redirected || whole || git).then(|| {
         "This could hide that the decisions were committed (ingrain's marker in .git, reflogs, \
          refs), which would let agents accept decisions without asking."
             .to_owned()
@@ -974,6 +1024,8 @@ mod tests {
             "git -c gc.reflogExpire=now gc",
             "git push -q . :main",
             "git update-ref refs/heads/main 0000000000000000000000000000000000000000",
+            "echo x > .git/logs/HEAD",
+            "rm -rf ./.git",
             "git reflog expire --expire=now --all",
             "git update-ref -d refs/remotes/origin/main",
         ] {
@@ -1028,6 +1080,15 @@ mod tests {
             "ls -R decisions; for f in decisions/pending/*; do echo \"== $f\"; cat \"$f\"; done",
             "if git diff --quiet decisions/; then echo same; fi",
             "ls .git/ingrain/sessions",
+            "rm -f .git/index.lock && git commit -m x",
+            "chmod +x .git/hooks/pre-commit",
+            "tar --exclude .git -czf /tmp/x.tgz .",
+            "rm -rf vendor/lib/.git",
+            "du -sh .git",
+            "git gc",
+            "git update-ref refs/heads/tmp HEAD",
+            "git push . HEAD:main",
+            "echo '*.log' >> .git/info/exclude",
             "git reflog -5",
         ] {
             assert!(needs_approval(cmd).is_none(), "{cmd}");
@@ -1045,6 +1106,7 @@ mod tests {
             "ingrain decisions list | sort | tee /dev/stderr",
             "mkdir -p .github/workflows && ingrain decisions accept P-1",
             "git --no-pager log --oneline -3; ingrain decisions accept P-1",
+            "ingrain decisions accept P-1 && git add decisions && git commit -m 'Set up `ingrain`'",
             "ingrain decisions accept P-1 P-2",
             "/Users/me/.cargo/bin/ingrain decisions accept P-1 2>/dev/null",
             "ingrain decisions accept P-1 > /dev/null 2>&1",
@@ -1089,6 +1151,7 @@ mod tests {
             "git commit -m \"$(ingrain --repo ../o decisions accept P-1)\"",
             "git commit -m \"$(rm decisions/D-0001.yml)\"",
             "cd /tmp && ingrain decisions accept P-1",
+            "pushd ../o && ingrain decisions accept P-1",
             "ingrain decisions list | tee ../x",
             "sort -o decisions/D-0001.yml x",
         ] {
