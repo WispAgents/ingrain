@@ -249,6 +249,8 @@ impl Git {
         } else {
             std::env::current_dir().ok()?.join(path)
         };
+        // `a/missing/../b` must not hide `a/b`: collapse `.` and `..` before walking up.
+        let abs = lexical_normalize(&abs);
         let canon = |p: &Path| {
             std::fs::canonicalize(p)
                 .ok()
@@ -276,6 +278,24 @@ impl Git {
         self.relative_in_repo(path)
             .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
     }
+}
+
+/// Collapse `.` and `..` components without touching the filesystem.
+fn lexical_normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push(c);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Strip the Windows verbatim prefix (`\\?\`) that git rejects.
@@ -425,6 +445,14 @@ mod tests {
             None,
             "the root itself is not a file"
         );
+        // `..` through a directory that doesn't exist still lands inside the repo.
+        let sneaky = dir.path().join("decisions/missing/../D-0001.yml");
+        assert_eq!(
+            repo.relative_in_repo(&sneaky).as_deref(),
+            Some("decisions/D-0001.yml")
+        );
+        let outside = dir.path().join("missing/../../elsewhere.txt");
+        assert_eq!(repo.relative_in_repo(&outside), None);
     }
 
     #[test]

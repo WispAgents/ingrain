@@ -568,3 +568,118 @@ fn plugin_hooks_answer_only_in_set_up_repos_without_their_own() {
     std::fs::write(dir.join(".claude/settings.json"), settings.to_string()).unwrap();
     assert!(plugin("pre-tool-use", edit("decisions/D-0001.yml")).is_some());
 }
+
+fn decision_of(answer: Option<Value>) -> String {
+    answer
+        .and_then(|a| {
+            a["hookSpecificOutput"]["permissionDecision"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn enforcement_gaps_shell_config_overrides_and_ci() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &[
+            "add",
+            "No axios in src.",
+            "--scope",
+            "src/**",
+            "--forbid-import",
+            "axios",
+        ],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "decisions"]);
+
+    // Shell commands that would change reviewed files need the person's approval.
+    let bash = |id: &str, command: &str| {
+        json!({"session_id": "b", "cwd": dir, "tool_name": "Bash", "tool_use_id": id,
+            "tool_input": {"command": command}})
+    };
+    let sed = bash("t1", "sed -i 's/accepted/superseded/' decisions/D-0001.yml");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", sed)), "ask");
+    let mode = bash("t2", "ingrain rules mode some-rule shadow");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", mode)), "ask");
+    let cat = bash("t3", "cat decisions/D-0001.yml");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", cat.clone())), "");
+    assert!(hook(dir, "post-tool-use", cat).is_none());
+
+    // A file a shell command writes is checked after it runs, and recorded for Stop.
+    std::fs::write(dir.join("src/notes.ts"), "// the person's own work\n").unwrap();
+    let write = bash(
+        "t4",
+        "printf \"import axios from 'axios';\\n\" > src/new.ts",
+    );
+    assert!(hook(dir, "pre-tool-use", write.clone()).is_none());
+    std::fs::write(dir.join("src/new.ts"), "import axios from 'axios';\n").unwrap();
+    let after = hook(dir, "post-tool-use", write).expect("post hook answers");
+    assert_eq!(after["decision"], "block");
+    let reason = after["reason"].as_str().unwrap();
+    assert!(reason.contains("src/new.ts"), "{reason}");
+    assert!(!reason.contains("notes.ts"), "{reason}");
+    let session: Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join(".git/ingrain/sessions/b.json")).unwrap(),
+    )
+    .unwrap();
+    let edited: Vec<&str> = session["edited"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(edited, vec!["src/new.ts"], "only what the command changed");
+    assert!(session["bash"].as_object().unwrap().is_empty());
+    std::fs::remove_file(dir.join("src/new.ts")).unwrap();
+    std::fs::remove_file(dir.join("src/notes.ts")).unwrap();
+
+    // The config is reviewed too, and a broken one doesn't switch the hooks off.
+    let config = json!({"session_id": "c", "cwd": dir, "tool_name": "Write",
+        "tool_input": {"file_path": dir.join(".corrections/config.yml"), "content": "ignore: ['[']\n"}});
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", config)), "deny");
+    std::fs::write(dir.join(".corrections/config.yml"), "ignore: ['[']\n").unwrap();
+    let tamper = json!({"session_id": "c", "cwd": dir, "tool_name": "Edit",
+        "tool_input": {"file_path": dir.join("decisions/D-0001.yml"),
+            "old_string": "status: accepted", "new_string": "status: superseded"}});
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", tamper)), "deny");
+    let via_dotdot = json!({"session_id": "c", "cwd": dir, "tool_name": "Write",
+        "tool_input": {"file_path": dir.join("decisions/nope/../D-0001.yml"), "content": "x"}});
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", via_dotdot)), "deny");
+    let axios = json!({"session_id": "c", "cwd": dir, "tool_name": "Write",
+        "tool_input": {"file_path": dir.join("src/x.ts"), "content": "import axios from 'axios';\n"}});
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", axios)), "deny");
+    git(dir, &["checkout", "-q", "--", ".corrections/config.yml"]);
+
+    // Adding an ignore comment is an exception a person approves.
+    let ignore = json!({"session_id": "c", "cwd": dir, "tool_name": "Write",
+        "tool_input": {"file_path": dir.join("src/y.ts"),
+            "content": "// decisions-ignore D-0001: upload needs it\nimport axios from 'axios';\n"}});
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", ignore)), "ask");
+
+    // CI shows overrides on added lines, so reviewers see the exception.
+    git(dir, &["checkout", "-q", "-b", "override"]);
+    std::fs::write(
+        dir.join("src/y.ts"),
+        "// decisions-ignore D-0001: upload needs it\nimport axios from 'axios';\n",
+    )
+    .unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "override"]);
+    let out = run(
+        dir,
+        &["check", "--diff", "main...HEAD", "--format", "github"],
+        "",
+    );
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("::warning file=src/y.ts,line=2,title=decision D-0001 overridden::"),
+        "{text}"
+    );
+}

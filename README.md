@@ -94,11 +94,13 @@ Each is a no-op for teammates who don't have ingrain installed, and all of them 
 | Hook | What happens |
 |---|---|
 | `SessionStart` | Repo-wide decisions go into the session, plus how to propose a new one |
-| `PreToolUse` on Edit / Write / MultiEdit | The edit is simulated first. If an added line breaks a decision's check, the edit is **denied** with the decision and the way out. Otherwise the decisions scoped to that file are shown, each once per session |
-| `PostToolUse` on Edit / Write / MultiEdit | Learned rules run on the edited file. Warn: a note to the agent. Block: the agent must fix it, with the past human fix shown |
-| `Stop` | Rules and decisions are re-checked on the files this session edited. Something broken sends the turn back, up to `stop_max_attempts` times |
+| `PreToolUse` on Edit / Write / MultiEdit / NotebookEdit | The edit is simulated first. If an added line breaks a decision's check, the edit is **denied** with the decision and the way out. An edit that adds an `ingrain-ignore` / `decisions-ignore` comment asks the person first. Otherwise the decisions scoped to that file are shown, each once per session |
+| `PreToolUse` on Bash | A command that could write accepted decisions, rules or `.corrections/config.yml` (`sed -i`, `>`, `mv`, `rm`, …), or that accepts, rejects or retunes them (`ingrain rules mode`, `ingrain decisions accept`, …), or `git commit --no-verify`, asks the person first |
+| `PostToolUse` on Edit / Write / MultiEdit / NotebookEdit / Bash | Learned rules run on the edited file, or on the files the shell command changed (decisions too, since a command can't be simulated). Warn: a note to the agent. Block: the agent must fix it, with the past human fix shown |
+| `Stop` | Rules and decisions are re-checked on the files this session edited. Something broken sends the turn back, up to `stop_max_attempts` times; after that the turn ends and the person is told |
 
-Agents can't edit accepted decisions or rules; they propose with `ingrain decisions add --propose`
+Agents can't edit accepted decisions, rules or `.corrections/config.yml` (a broken config falls back
+to the defaults in hooks, so it can't switch them off); they propose with `ingrain decisions add --propose`
 or `ingrain decisions supersede`, and a person accepts.
 
 Tested live with Claude Code 2.1.322: asked to write raw `fetch` in `src/billing/`, the write was
@@ -115,8 +117,11 @@ existing code never blocks.
 | Pull request | `ingrain check --diff base...HEAD --format github` ([action](action/action.yml)) | annotations; failing check |
 | By hand | `ingrain check [paths]` | listed; exit 1 if something blocks |
 
-Pre-commit and CI judge a change by the decisions it started from, so a branch can't retire a
-decision and break it in the same diff. CI also flags any change to the ledger.
+Pre-commit and CI judge a change by the decisions, learned rules and config it started from, so a
+branch can't retire a decision, delete a rule, set it to shadow or ignore its path, and break it in
+the same diff. CI also flags any change to `decisions/` or `.corrections/`. Outside pull requests
+the Action compares with the default branch. The pre-commit hook goes where git runs hooks
+(`core.hooksPath`, or the main `.git/hooks` from a worktree).
 
 To keep a line on purpose, add a comment with a reason, on the line or the line above:
 
@@ -126,7 +131,9 @@ To keep a line on purpose, add a comment with a reason, on the line or the line 
 const res = await fetch(url);
 ```
 
-Without a reason it doesn't count. Overrides are logged; `ingrain rules promote` and
+Without a reason it doesn't count. On the line above, only a line that is just the comment counts.
+An agent adding one is asked to get the person's approval, and CI shows every override on added
+lines as a warning annotation. Overrides are logged; `ingrain rules promote` and
 `ingrain decisions stale` flag rules and decisions that are overridden often.
 
 ## Decisions

@@ -215,8 +215,16 @@ fn learns_a_rule_and_enforces_it_everywhere() {
         let answer: Value = serde_json::from_str(&stdout(&out)).unwrap();
         assert_eq!(answer["decision"], "block");
     }
+    // The 4th is let through (no block), and the person is told.
     let out = ingrain_stdin(dir, &["hook", "stop"], &stop);
-    assert_eq!(stdout(&out).trim(), "", "4th stop is let through");
+    let answer: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert!(answer.get("decision").is_none(), "4th stop is let through");
+    assert!(
+        answer["systemMessage"]
+            .as_str()
+            .unwrap()
+            .contains("1 broken rules")
+    );
 
     // An override with a reason clears it; without a reason it doesn't.
     std::fs::write(
@@ -234,9 +242,22 @@ fn learns_a_rule_and_enforces_it_everywhere() {
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(stdout(&out).contains("[overridden]"));
 
-    // Pre-commit path: staged code with the mistake is refused.
+    // Pre-commit judges by the rules committed at HEAD, so a commit can't relax a rule and
+    // break it: the uncommitted switch to block doesn't count yet.
     std::fs::write(dir.join("src/feature10.ts"), "const r = fetch('/a');\n").unwrap();
+    git(dir, &["add", "src/feature10.ts", ".corrections/rules"]);
+    assert_eq!(ingrain(dir, &["check", "--staged"]).status.code(), Some(0));
+    git(dir, &["reset", "-q", "src/feature10.ts"]);
+    git(dir, &["commit", "-qm", "block avoid-fetch-call"]);
     git(dir, &["add", "src/feature10.ts"]);
+    assert_eq!(ingrain(dir, &["check", "--staged"]).status.code(), Some(1));
+    // Staging a change that sets the rule back to shadow doesn't help.
+    assert!(
+        ingrain(dir, &["rules", "mode", "avoid-fetch-call", "shadow"])
+            .status
+            .success()
+    );
+    git(dir, &["add", ".corrections/rules"]);
     assert_eq!(ingrain(dir, &["check", "--staged"]).status.code(), Some(1));
 
     // Existing code never blocks: feature0..3 were fixed, and api.ts never used fetch.

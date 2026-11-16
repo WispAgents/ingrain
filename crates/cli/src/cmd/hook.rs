@@ -8,11 +8,12 @@
 //! - stop: rules and decisions are re-checked on the files this session edited.
 
 use super::Outcome;
+use crate::bash;
 use crate::check::{self, Finding};
 use crate::hitlog::Event as HitEvent;
 use crate::overrides;
 use crate::repo::Repo;
-use crate::session::Session;
+use crate::session::{BashSnapshot, Session};
 use anyhow::Result;
 use ingrain_core::{DiffBase, LineRange, Mode};
 use ingrain_ledger::scope::{self, Scope};
@@ -59,7 +60,7 @@ fn plugin_steps_aside(dir: &Path, payload: &Value) -> bool {
     if ingrain_core::Git::open(dir).is_err() {
         return true; // not a git repo
     }
-    let repo = match Repo::open(dir) {
+    let repo = match Repo::open_lenient(dir) {
         Ok(repo) => repo,
         Err(e) => {
             eprintln!("ingrain hook error (ignored): {e:#}");
@@ -89,39 +90,74 @@ fn plugin_steps_aside(dir: &Path, payload: &Value) -> bool {
 /// The JSON to print, if any.
 pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>> {
     let dir = payload["cwd"].as_str().map(Path::new).unwrap_or(dir);
-    let repo = Repo::open(dir)?;
+    let tool = payload["tool_name"].as_str().unwrap_or("");
+
+    // Accepted decisions, rules and config are reviewed by people; agents propose instead.
+    // Checked before anything else is loaded, so a broken config or ledger can't switch it off.
+    if let Event::PreToolUse = event {
+        let git = ingrain_core::Git::open(dir)?;
+        if let Some(rel) = edited_path(&git, payload)
+            && bash::is_reviewed_file(&rel)
+        {
+            return Ok(Some(deny(format!(
+                "`{rel}` is reviewed by people; agents don't edit it. To change a decision, run \
+                 `ingrain decisions supersede <id> --decision \"...\" --reason \"...\"`; to record a new one, \
+                 `ingrain decisions add --propose \"...\"`. A person accepts both."
+            ))));
+        }
+        if tool == "Bash"
+            && let Some(why) = payload["tool_input"]["command"]
+                .as_str()
+                .and_then(bash::needs_approval)
+        {
+            return Ok(Some(ask(format!("ingrain: {why}"))));
+        }
+    }
+
+    let repo = Repo::open_lenient(dir)?;
     let session_id = payload["session_id"].as_str().unwrap_or("default");
     let sessions = repo.layout.sessions_dir();
     let mut session = Session::load(&sessions, session_id);
-
-    // Accepted decisions and rules are reviewed by people. Agents propose instead.
-    if let Event::PreToolUse = event
-        && let Some(rel) = edited_path(&repo, payload)
-        && is_reviewed_file(&rel)
-    {
-        return Ok(Some(deny(format!(
-            "`{rel}` is reviewed by people; agents don't edit it. To change a decision, run \
-             `ingrain decisions supersede <id> --decision \"...\" --reason \"...\"`; to record a new one, \
-             `ingrain decisions add --propose \"...\"`. A person accepts both."
-        ))));
-    }
+    let tool_use_id = payload["tool_use_id"].as_str().map(str::to_owned);
 
     let decisions = repo.ledger.live_lenient();
     let answer = match event {
         Event::SessionStart => session_start(&decisions, &mut session, payload),
+        Event::PreToolUse if tool == "Bash" => {
+            // Remember what was already changed, to tell what the command changes.
+            if let Some(id) = &tool_use_id {
+                let snap = BashSnapshot {
+                    time: crate::session::now(),
+                    files: bash::snapshot(&repo.git),
+                };
+                session.bash.insert(id.clone(), snap);
+            }
+            None
+        }
         Event::PreToolUse => pre_tool_use(&repo, &decisions, &mut session, payload),
-        Event::PostToolUse => post_tool_use(&repo, &mut session, payload)?,
+        Event::PostToolUse => post_tool_use(&repo, &decisions, &mut session, payload)?,
         Event::Stop => stop(&repo, &decisions, &mut session)?,
     };
-    // Hooks for parallel tool calls can overlap: keep files others recorded meanwhile.
-    let on_disk = Session::load(&sessions, session_id);
-    session.edited.extend(on_disk.edited);
-    session.save(&sessions, session_id)?;
+    // Hooks for parallel tool calls can overlap: keep what others recorded meanwhile. The answer
+    // is already decided; failing to save state must not drop it.
+    let consumed = matches!(event, Event::PostToolUse)
+        .then_some(tool_use_id.as_deref())
+        .flatten();
+    session.merge(Session::load(&sessions, session_id), consumed);
+    if let Err(e) = session.save(&sessions, session_id) {
+        eprintln!("ingrain: couldn't save hook state: {e:#}");
+    }
     Ok(answer)
 }
 
 fn context(event: &str, text: String) -> Value {
     json!({ "hookSpecificOutput": { "hookEventName": event, "additionalContext": text } })
+}
+
+/// Let the person decide in Claude Code's permission prompt.
+fn ask(reason: String) -> Value {
+    json!({ "hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason } })
 }
 
 fn deny(reason: String) -> Value {
@@ -130,17 +166,12 @@ fn deny(reason: String) -> Value {
 }
 
 /// The repo-relative path an edit targets; `None` for files outside the repository.
-fn edited_path(repo: &Repo, payload: &Value) -> Option<String> {
-    let file = payload["tool_input"]["file_path"].as_str()?;
-    repo.git.relative_in_repo(Path::new(file))
-}
-
-/// Accepted decision records and learned rules; proposals stay editable.
-fn is_reviewed_file(rel: &str) -> bool {
-    let yaml =
-        |rest: &str| !rest.contains('/') && (rest.ends_with(".yml") || rest.ends_with(".yaml"));
-    rel.strip_prefix("decisions/").is_some_and(yaml)
-        || rel.strip_prefix(".corrections/rules/").is_some_and(yaml)
+fn edited_path(git: &ingrain_core::Git, payload: &Value) -> Option<String> {
+    let input = &payload["tool_input"];
+    let file = input["file_path"]
+        .as_str()
+        .or_else(|| input["notebook_path"].as_str())?;
+    git.relative_in_repo(Path::new(file))
 }
 
 fn session_start(decisions: &[Record], session: &mut Session, payload: &Value) -> Option<Value> {
@@ -171,19 +202,25 @@ fn pre_tool_use(
     payload: &Value,
 ) -> Option<Value> {
     // Not recorded as edited here: the edit may still be denied. PostToolUse records it.
-    let rel = edited_path(repo, payload)?;
-    if decisions.is_empty() {
-        return None;
-    }
+    let rel = edited_path(&repo.git, payload)?;
+    let tool = payload["tool_name"].as_str().unwrap_or("");
     let current = repo.read(&rel);
-    let after = apply_edit(
-        payload["tool_name"].as_str().unwrap_or(""),
+    let after = apply_edit(tool, &payload["tool_input"], current.as_deref());
+
+    // An ignore comment is an exception to a rule or decision: a person grants it. Asked
+    // after the decision check, so approving the comment can't let a broken decision through.
+    let ask_ignore = adds_ignore_comment(
+        tool,
         &payload["tool_input"],
         current.as_deref(),
-    );
+        after.as_deref(),
+    )
+    .map(ask);
 
     // Check what the file would look like after this edit, before it happens.
-    if let Some(after) = &after {
+    if let Some(after) = &after
+        && !decisions.is_empty()
+    {
         let added = added_lines(current.as_deref().unwrap_or(""), after);
         let checker = Checker::new(decisions);
         if !checker.is_empty() && !added.is_empty() {
@@ -199,6 +236,9 @@ fn pre_tool_use(
                 return Some(deny(message::violations(&broken, decisions, true)));
             }
         }
+    }
+    if ask_ignore.is_some() {
+        return ask_ignore;
     }
 
     // Otherwise, show the decisions for this file that the agent hasn't seen yet.
@@ -219,28 +259,107 @@ fn pre_tool_use(
     ))
 }
 
-fn post_tool_use(repo: &Repo, session: &mut Session, payload: &Value) -> Result<Option<Value>> {
-    let Some(rel) = edited_path(repo, payload) else {
-        return Ok(None);
+fn post_tool_use(
+    repo: &Repo,
+    decisions: &[Record],
+    session: &mut Session,
+    payload: &Value,
+) -> Result<Option<Value>> {
+    let is_bash = payload["tool_name"].as_str() == Some("Bash");
+    let files: Vec<String> = if is_bash {
+        // Only files the command changed, not the person's own uncommitted work.
+        let Some(before) = payload["tool_use_id"]
+            .as_str()
+            .and_then(|id| session.bash.remove(id))
+        else {
+            return Ok(None);
+        };
+        bash::changed(&before.files, &bash::snapshot(&repo.git))
+    } else {
+        edited_path(&repo.git, payload).into_iter().collect()
     };
-    session.edited.insert(rel.clone());
-    let rules = repo.compiled_rules()?;
-    if rules.is_empty() {
+    if files.is_empty() {
         return Ok(None);
     }
-    let targets = check::targets(repo, &DiffBase::Head, Some(&[rel]))?;
-    let findings = check::find(&rules, &targets);
-    super::check::log(repo, &findings, "hook")?;
+    session.edited.extend(files.iter().cloned());
+    let rules = repo.compiled_rules()?;
+    let findings = if rules.is_empty() {
+        Vec::new()
+    } else {
+        let targets = check::targets(repo, &DiffBase::Head, Some(&files))?;
+        check::find(&rules, &targets)
+    };
+    if let Err(e) = super::check::log(repo, &findings, "hook") {
+        eprintln!("ingrain: couldn't log rule hits: {e:#}");
+    }
     let block = super::check::active(&findings, Mode::Block);
     let warn = super::check::active(&findings, Mode::Warn);
-    Ok(if !block.is_empty() {
-        let mut all = block;
-        all.extend(warn);
-        Some(json!({ "decision": "block", "reason": check::agent_message(&all, true) }))
+    // Edits were checked against decisions before they ran; shell commands only can be after.
+    let broken: Vec<Violation> = if is_bash && !decisions.is_empty() {
+        let checker = Checker::new(decisions);
+        repo.decision_targets(&DiffBase::Head, Some(&files))?
+            .iter()
+            .flat_map(|t| checker.check(t))
+            .filter(|v| v.overridden.is_none())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(if !block.is_empty() || !broken.is_empty() {
+        let mut reason = String::new();
+        if !block.is_empty() {
+            let mut all = block;
+            all.extend(warn);
+            reason.push_str(&check::agent_message(&all, true));
+        }
+        if !broken.is_empty() {
+            if !reason.is_empty() {
+                reason.push('\n');
+            }
+            let refs: Vec<&Violation> = broken.iter().collect();
+            reason.push_str(&message::violations(&refs, decisions, false));
+        }
+        Some(json!({ "decision": "block", "reason": reason }))
     } else if !warn.is_empty() {
         Some(context("PostToolUse", check::agent_message(&warn, false)))
     } else {
         None
+    })
+}
+
+const IGNORE_MARKERS: &[&str] = &["ingrain-ignore", "decisions-ignore"];
+
+/// Why the person should approve an edit that adds an `ingrain-ignore` / `decisions-ignore`
+/// comment, if it does.
+fn adds_ignore_comment(
+    tool: &str,
+    input: &Value,
+    current: Option<&str>,
+    after: Option<&str>,
+) -> Option<String> {
+    let count =
+        |text: &str| -> usize { IGNORE_MARKERS.iter().map(|m| text.matches(m).count()).sum() };
+    let added = match after {
+        Some(after) => count(after) > count(current.unwrap_or("")),
+        // The edit couldn't be simulated: compare what it writes with what it replaces.
+        None => {
+            let pairs: Vec<&Value> = match tool {
+                "MultiEdit" => input["edits"].as_array()?.iter().collect(),
+                _ => vec![input],
+            };
+            pairs.iter().any(|e| {
+                let new = e["new_string"]
+                    .as_str()
+                    .or_else(|| e["content"].as_str())
+                    .unwrap_or("");
+                count(new) > count(e["old_string"].as_str().unwrap_or(""))
+            })
+        }
+    };
+    added.then(|| {
+        "ingrain: this edit adds an ignore comment, an exception to a project decision or learned \
+         rule. Approve only if the exception is right."
+            .to_owned()
     })
 }
 
@@ -275,13 +394,17 @@ fn stop(repo: &Repo, decisions: &[Record], session: &mut Session) -> Result<Opti
         // Let the turn end; record it for the person to see.
         session.stop_attempts = 0;
         let unresolved: Vec<Finding> = blocked.into_iter().cloned().collect();
-        super::check::log_event(repo, &unresolved, "stop", HitEvent::Unresolved)?;
-        eprintln!(
-            "ingrain: turn ended with {} broken rules and {} broken decisions",
+        if let Err(e) = super::check::log_event(repo, &unresolved, "stop", HitEvent::Unresolved) {
+            eprintln!("ingrain: couldn't log unresolved hits: {e:#}");
+        }
+        let note = format!(
+            "ingrain: turn ended with {} broken rules and {} broken decisions after {} attempts",
             unresolved.len(),
-            broken.len()
+            broken.len(),
+            repo.config.stop_max_attempts
         );
-        return Ok(None);
+        eprintln!("{note}");
+        return Ok(Some(json!({ "systemMessage": note })));
     }
     session.stop_attempts += 1;
     let mut reason = String::new();
@@ -398,10 +521,18 @@ mod tests {
     }
 
     #[test]
-    fn reviewed_files() {
-        assert!(is_reviewed_file("decisions/D-0001.yml"));
-        assert!(is_reviewed_file(".corrections/rules/avoid-x.yml"));
-        assert!(!is_reviewed_file("decisions/pending/P-1.yml"));
-        assert!(!is_reviewed_file("src/decisions/x.yml"));
+    fn ignore_comments_need_approval() {
+        let cur = "a\n";
+        let edit = json!({"old_string": "a", "new_string": "a // ingrain-ignore x: why"});
+        let after = apply_edit("Edit", &edit, Some(cur));
+        assert!(adds_ignore_comment("Edit", &edit, Some(cur), after.as_deref()).is_some());
+        // Moving an existing comment around doesn't add one.
+        let cur = "f() // decisions-ignore D-1: y\n";
+        let edit = json!({"old_string": "f()", "new_string": "g()"});
+        let after = apply_edit("Edit", &edit, Some(cur));
+        assert!(adds_ignore_comment("Edit", &edit, Some(cur), after.as_deref()).is_none());
+        // Unsimulated edit: compare new_string with old_string.
+        let edit = json!({"old_string": "zz", "new_string": "zz # ingrain-ignore r: q"});
+        assert!(adds_ignore_comment("Edit", &edit, Some("a"), None).is_some());
     }
 }
