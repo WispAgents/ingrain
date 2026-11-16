@@ -34,7 +34,7 @@ pub struct ProposeOptions<'a> {
 impl Default for ProposeOptions<'_> {
     fn default() -> Self {
         Self {
-            min_support: 3,
+            min_support: 1,
             min_precision: 0.5,
             max_after_rate: 0.1,
             llm: None,
@@ -146,7 +146,10 @@ pub fn propose(
             .map(|(_, &m)| cluster::source_key(&train[m]))
             .collect::<HashSet<_>>()
             .len();
+        // A rule backed by one fix always catches that fix; it also needs a hit on other agent code.
+        let evidence = caught_support >= 2 || s.true_hits + s.false_hits > 0;
         caught_support >= opts.min_support
+            && evidence
             && s.after_rate() <= opts.max_after_rate
             && s.precision_lower_bound()
                 .is_none_or(|p| p >= opts.min_precision)
@@ -460,10 +463,33 @@ mod tests {
             .collect();
         let opts = ProposeOptions {
             known_before: 2,
+            min_support: 3,
             ..Default::default()
         };
         let (props, _) = propose(&cs, &[], &opts).unwrap();
         assert!(props.is_empty(), "only 2 corrections before the cutoff");
+        // By default one correction is enough, if the rule also hits other agent code.
+        let opts = ProposeOptions {
+            known_before: 1,
+            ..Default::default()
+        };
+        let (props, _) = propose(&cs, &[], &opts).unwrap();
+        assert!(props.is_empty(), "one fix and no other evidence");
+        // The agent hunk c0 came from: its corrected line is a true hit.
+        // (3 hits: the precision lower bound needs them to clear 50%).
+        let mut agent =
+            crate::backtest::tests::hunk("x = fetch(a);\ny = fetch(b);\nz = fetch(c);\n", None, 0);
+        agent.corrected.push(ingrain_core::CorrectedLines {
+            lines: ingrain_core::LineRange::new(1, 3),
+            time: 0,
+            correction: "c0".into(),
+        });
+        let (props, _) = propose(&cs, &[agent], &opts).unwrap();
+        assert_eq!(
+            props.len(),
+            1,
+            "a single fix with agent-code hits proposes a rule"
+        );
 
         let opts = ProposeOptions {
             taken_ids: ["avoid-fetch-call".to_string()].into(),

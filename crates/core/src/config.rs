@@ -12,7 +12,9 @@ pub struct Config {
     pub agent_markers: Vec<String>,
     /// A human commit counts as a correction only within this many days of the agent commit.
     pub window_days: u32,
-    /// Minimum corrections in a cluster before a rule is proposed.
+    /// Minimum corrections in a cluster before a rule is proposed. 1 proposes a rule from a
+    /// single fix (the backtest still has to pass); raise it for fewer, better-supported rules.
+    /// `--min-corrections` overrides it.
     pub min_support: u32,
     /// Minimum precision on agent code (lower bound of the 90% Wilson interval):
     /// the share of a rule's hits on agent code that humans later corrected.
@@ -31,7 +33,7 @@ impl Default for Config {
         Self {
             agent_markers: Vec::new(),
             window_days: 14,
-            min_support: 3,
+            min_support: 1,
             min_precision: 0.5,
             ignore: vec![
                 "**/node_modules/**".into(),

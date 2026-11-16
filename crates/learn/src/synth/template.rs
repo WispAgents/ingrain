@@ -123,8 +123,13 @@ pub fn message(cluster: &Cluster) -> String {
         format!("`{}`", a.token)
     };
     let n = cluster.support;
+    let corrections = if n == 1 {
+        "1 past correction".to_owned()
+    } else {
+        format!("{n} past corrections")
+    };
     if cluster.replacements.is_empty() {
-        format!("Avoid {what} here: humans removed it in {n} past corrections of agent code.")
+        format!("Avoid {what} here: humans removed it in {corrections} of agent code.")
     } else {
         let with: Vec<String> = cluster
             .replacements
@@ -132,7 +137,7 @@ pub fn message(cluster: &Cluster) -> String {
             .map(|r| format!("`{r}`"))
             .collect();
         format!(
-            "Avoid {what} here: in {n} past corrections humans replaced it with {}.",
+            "Avoid {what} here: in {corrections} humans replaced it with {}.",
             with.join(" / ")
         )
     }

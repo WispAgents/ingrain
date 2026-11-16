@@ -19,6 +19,10 @@ pub struct Args {
     model: Option<String>,
     #[arg(long, default_value_t = 10)]
     llm_clusters: usize,
+    /// Corrections of the same pattern needed before a rule is proposed (default: `min_support`
+    /// in .corrections/config.yml, 1 unless set). Raise it for fewer, better-supported rules.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    min_corrections: Option<u32>,
     /// Write the full report as JSON.
     #[arg(long)]
     json: Option<PathBuf>,
@@ -29,13 +33,14 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     let corrections: Vec<Correction> = store::read(&repo.layout.corrections_file())?;
     let hunks: Vec<AgentHunk> = store::read(&repo.layout.agent_hunks_file())?;
     let backend = llm::backend(&args.llm, args.model.as_deref())?;
+    let min_support = args.min_corrections.unwrap_or(repo.config.min_support) as usize;
     let report = eval::evaluate(
         &corrections,
         &hunks,
         EvalOptions {
             split: args.split,
             propose: ProposeOptions {
-                min_support: repo.config.min_support as usize,
+                min_support,
                 min_precision: repo.config.min_precision,
                 llm: backend.as_deref(),
                 llm_clusters: args.llm_clusters,
@@ -60,7 +65,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         "patterns: {:.0}% removed a salient token · {:.0}% sit in a cluster of {}+ fixes",
         pct(report.with_anchor, report.corrections),
         pct(report.repeated, report.corrections),
-        repo.config.min_support
+        ingrain_learn::eval::REPEATED
     );
     println!(
         "split: learn on {} corrections, test on {} (and {} agent hunks)",

@@ -181,7 +181,7 @@ pub fn by_id<'a>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::cluster::tests::correction;
     use ingrain_core::CorrectedLines;
@@ -189,7 +189,7 @@ mod tests {
     const RULE: &str =
         "id: no-fetch\nlanguage: TypeScript\nrule:\n  pattern: fetch($$$A)\nmessage: m\n";
 
-    fn hunk(text: &str, corrected: Option<LineRange>, time: i64) -> AgentHunk {
+    pub(crate) fn hunk(text: &str, corrected: Option<LineRange>, time: i64) -> AgentHunk {
         AgentHunk {
             commit: "a".into(),
             path: "src/x.ts".into(),

@@ -177,12 +177,10 @@ decisions ([docs/ledger-study](docs/ledger-study/report.md)).
 
 `ingrain rules propose` clusters corrections by what they removed, writes rules (templates first, then a
 model), and keeps a rule only if it catches the past mistakes, spares the fixed versions, and is
-precise on agent code humans kept. Accepted rules start in shadow mode; `ingrain rules promote` moves them
-to warn and block from their hit log. `ingrain rules eval` measures the whole loop on your history.
-
-Expect few rules at first: on 17 public repos, most human fixes of agent code were one-off bug fixes
-and taste, not repeated mistakes ([docs/validation.md](docs/validation.md)). Decisions you record
-are the main lever; learned rules catch what repeats.
+precise on agent code humans kept. One correction is enough to propose a rule; pass
+`--min-corrections 3` (or set `min_support` in `.corrections/config.yml`) to wait for a mistake to
+repeat. Accepted rules start in shadow mode; `ingrain rules promote` moves them to warn and block
+from their hit log. `ingrain rules eval` measures the whole loop on your history.
 
 ## Commands
 
@@ -191,7 +189,7 @@ are the main lever; learned rules catch what repeats.
 | `init` | Create `decisions/` and `.corrections/`, install hooks |
 | `check [paths] [--staged \| --diff RANGE] [--format text\|json\|github]` | Rules and decisions on added lines |
 | `decisions add \| extract \| review \| accept \| reject \| supersede \| list \| show \| for \| stale` | The decision ledger |
-| `rules mine \| propose [--explain] \| review \| accept \| reject \| list \| mode \| promote \| eval` | Learned rules |
+| `rules mine \| propose [--explain] [--min-corrections N] \| review \| accept \| reject \| list \| mode \| promote \| eval` | Learned rules |
 | `hook <session-start\|pre-tool-use\|post-tool-use\|stop>` | Claude Code hook entry point |
 
 ## CI

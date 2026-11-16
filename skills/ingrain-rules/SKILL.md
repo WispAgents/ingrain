@@ -9,9 +9,8 @@ ingrain finds places where a person rewrote code an agent wrote, groups the repe
 ast-grep rule for each, and tests it on the repo's history. Rules live in `.corrections/rules/`;
 agents never edit them. The `ingrain` binary must be installed (see the `ingrain-setup` skill).
 
-Set expectations first: most human fixes are one-off bug fixes and taste, so a repo often yields
-few or no rules at first. That's normal. Decisions (the `ingrain-decide` skill) are the main lever;
-learned rules catch what repeats.
+A single correction is enough to propose a rule. Every proposal still has to pass the backtest,
+and the user reviews each one, so expect some one-off fixes among them: reject those with a reason.
 
 ## 1. Capture corrections
 
@@ -28,6 +27,8 @@ machine are read too; add `--no-transcripts` to skip them. Report the counts it 
 ```sh
 ingrain rules propose --explain
 ```
+
+Add `--min-corrections 3` to propose only mistakes people fixed at least 3 times (fewer, better-supported rules).
 
 Each proposal has passed a backtest: it catches the past mistakes, doesn't flag the fixed
 versions, and is precise on agent code people kept. `--explain` shows why clusters were rejected.

@@ -20,6 +20,10 @@ pub struct Args {
     /// Clusters sent to the model at most.
     #[arg(long, default_value_t = 10)]
     llm_clusters: usize,
+    /// Corrections of the same pattern needed before a rule is proposed (default: `min_support`
+    /// in .corrections/config.yml, 1 unless set). Raise it for fewer, better-supported rules.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    min_corrections: Option<u32>,
     /// Print every cluster and how each candidate rule scored.
     #[arg(long)]
     explain: bool,
@@ -35,11 +39,12 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     }
     let existing: Vec<CompiledRule> = repo.compiled_rules()?.into_iter().map(|(_, c)| c).collect();
     let backend = llm::backend(&args.llm, args.model.as_deref())?;
+    let min_support = args.min_corrections.unwrap_or(repo.config.min_support) as usize;
     if let Some(b) = &backend {
         eprintln!("rule writing falls back to {}", b.describe());
     }
     let opts = ProposeOptions {
-        min_support: repo.config.min_support as usize,
+        min_support,
         min_precision: repo.config.min_precision,
         llm: backend.as_deref(),
         llm_clusters: args.llm_clusters,
@@ -67,6 +72,11 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         stats.llm_tried,
         stats.llm_errors
     );
+    if args.min_corrections.is_none() && min_support > 1 {
+        println!(
+            "(min_support {min_support} from .corrections/config.yml; pass --min-corrections 1 to propose rules from single fixes)"
+        );
+    }
     if args.explain {
         print_explain(&stats.explain);
     }
