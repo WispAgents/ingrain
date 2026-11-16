@@ -69,7 +69,9 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
 next: `ingrain decisions extract --doc AGENTS.md` to propose decisions from your rule docs (or
       `ingrain decisions add \"...\"` to record one), then `ingrain decisions review`. Commit
       decisions/, .corrections/ and .claude/settings.json. Later, `ingrain rules mine` then
-      `ingrain rules propose` learn rules from your corrections. Agents: see `ingrain --help`."
+      `ingrain rules propose` learn rules from your corrections.
+agents: see `ingrain --help`. Until the first commit with decisions, run `ingrain decisions accept`
+      and the setup's `git add` / `git commit` as their own commands; the hooks let those through."
     );
     Ok(ExitCode::SUCCESS)
 }

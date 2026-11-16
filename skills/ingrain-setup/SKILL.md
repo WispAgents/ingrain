@@ -69,7 +69,9 @@ Until the first commit that contains decisions, rules or ingrain config, ingrain
 accept, reject, edit proposals and commit: nothing reviewed exists yet, and people review the setup
 commit like any other. After that commit, accepted records can't be edited by agents (the hook
 refuses), `accept` and `reject` need the person's approval, and changes go through
-`ingrain decisions supersede`. So finish steps 3 to 5 in one go.
+`ingrain decisions supersede`. So finish steps 3 to 5 in one go, and run `ingrain decisions accept …` and the `git add` /
+`git commit` as their own shell commands, without `cd`, variables or other programs in the same
+call: only those are let through without asking.
 
 ## 4. Add the CI check (GitHub)
 

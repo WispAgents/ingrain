@@ -111,9 +111,14 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
             let command = payload["tool_input"]["command"].as_str().unwrap_or("");
             bash_ask = bash::needs_approval(command);
             // Only setup's own commands, which can't reach another repository's ledger.
-            if bash_ask.is_some() && bash::setup_command(command) && is_first_setup(&git) {
-                first_setup = true;
-                bash_ask = bash::skips_verification(command);
+            if bash_ask.is_some() && is_first_setup(&git) {
+                if bash::setup_command(command, git.root()) {
+                    first_setup = true;
+                    bash_ask = bash::skips_verification(command);
+                } else if let Some(why) = &mut bash_ask {
+                    // Headless agents see this as a refusal: say how to get through.
+                    why.push_str(SETUP_HINT);
+                }
             }
         }
     }
@@ -140,6 +145,7 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
                     files: bash::snapshot(&repo.git),
                     asked: bash_ask.is_some() || first_setup,
                     head: bash::head(&repo.git),
+                    staged: bash::staged_reviewed(&repo.git),
                 };
                 session.bash.insert(id.clone(), snap);
             }
@@ -160,6 +166,11 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
     }
     Ok(answer)
 }
+
+const SETUP_HINT: &str = " ingrain is being set up in this repository (no decision is committed \
+     yet), so `ingrain decisions accept|reject` and `git add` / `git commit` of the setup go \
+     through without asking when run as their own command: no `cd`, `--repo`, variables, or \
+     other programs in the same call. Run them that way.";
 
 /// No decision, rule or ingrain config was ever committed: ingrain is being set up. The
 /// repository's history (every ref, so other branches and worktrees count) is read, not just
@@ -383,19 +394,55 @@ fn post_tool_use(
             if *was != bash::stamp_of(&repo.git, p) {
                 return false;
             }
+            // What was committed is what was staged before (a partly staged file), or what
+            // was on disk (`commit -a`).
             !moved_head
-                || now_head
-                    .as_deref()
-                    .is_some_and(|head| match repo.git.show(head, p) {
-                        Some(text) => bash::stamp_holds(was, text.as_bytes()),
-                        None => was == "deleted",
-                    })
+                || now_head.as_deref().is_some_and(|head| {
+                    let committed = repo
+                        .git
+                        .try_run(&["rev-parse", "--verify", "-q", &format!("{head}:{p}")])
+                        .map(|b| b.trim().to_owned());
+                    match committed {
+                        Some(blob) => {
+                            before.staged.get(p) == Some(&blob)
+                                || repo
+                                    .git
+                                    .show(head, p)
+                                    .is_some_and(|text| bash::stamp_holds(was, text.as_bytes()))
+                        }
+                        None => was == "deleted" || !before.staged.contains_key(p),
+                    }
+                })
         };
-        let reviewed: Vec<&String> = changed
+        // The index too (`git update-index`, `git apply --cached`, `git rm --cached`): a staged
+        // change counts unless it stages what is on disk, as it was (`git add`).
+        let staged_now = bash::staged_reviewed(&repo.git);
+        let restaged: Vec<String> = before
+            .staged
+            .keys()
+            .chain(staged_now.keys())
+            .filter(|p| before.staged.get(*p) != staged_now.get(*p))
+            .cloned()
+            .collect();
+        let staged_as_on_disk = |p: &str| {
+            before.files.get(p).is_some_and(|was| {
+                *was == bash::stamp_of(&repo.git, p)
+                    && repo
+                        .git
+                        .show_index(p)
+                        .is_some_and(|text| bash::stamp_holds(was, text.as_bytes()))
+            })
+        };
+        let mut reviewed: Vec<&String> = changed
             .iter()
             .filter(|p| bash::is_reviewed_file(p))
             .filter(|p| !recorded(p))
             .collect();
+        for p in &restaged {
+            if !moved_head && !staged_as_on_disk(p) && !reviewed.contains(&p) {
+                reviewed.push(p);
+            }
+        }
         if !before.asked && !reviewed.is_empty() {
             // The person may have edited it meanwhile, so don't tell the agent to restore it.
             let list: Vec<String> = reviewed.iter().map(|p| format!("`{p}`")).collect();

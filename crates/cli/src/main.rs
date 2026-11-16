@@ -27,8 +27,9 @@ Setting up a repo (for coding agents):
      and `ingrain decisions reject <P-id> --reason ...` for the rest
   5. On GitHub, add .github/workflows/ingrain.yml using WispAgents/ingrain/action
   6. Commit decisions/, .corrections/, .claude/settings.json and AGENTS.md on a branch
-Until that first commit, ingrain's hooks let the agent accept and commit; after it, agents only
-propose (`ingrain decisions add --propose`, `ingrain decisions supersede`) and a person accepts.
+Until that first commit, ingrain's hooks let the agent accept and commit, when each runs as its
+own command (no `cd`, variables or other programs in it); after it, agents only propose
+(`ingrain decisions add --propose`, `ingrain decisions supersede`) and a person accepts.
 Guide: https://github.com/WispAgents/ingrain/blob/main/skills/ingrain-setup/SKILL.md";
 
 #[derive(Parser)]

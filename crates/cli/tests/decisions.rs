@@ -1122,3 +1122,71 @@ fn staged_tampering_and_nested_ledgers() {
         );
     }
 }
+
+/// A file the person partly staged is committed as staged, not reported. A change made only
+/// in the index is reported when it happens.
+#[test]
+fn partly_staged_files_and_index_only_changes() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    let bash = |id: &str, command: &str| {
+        json!({"session_id": "p", "cwd": dir, "tool_name": "Bash", "tool_use_id": id,
+            "tool_input": {"command": command}})
+    };
+    let path = dir.join("decisions/D-0001.yml");
+    let record = std::fs::read_to_string(&path).unwrap();
+    // The person stages one edit and keeps another unstaged.
+    std::fs::write(&path, format!("{record}# a\n")).unwrap();
+    git(dir, &["add", "decisions/D-0001.yml"]);
+    std::fs::write(&path, format!("{record}# a\n# b\n")).unwrap();
+    let commit = bash("p1", "git commit -qm 'person staged this'");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", commit.clone())), "");
+    git(dir, &["commit", "-qm", "person staged this", "--no-verify"]);
+    assert!(
+        hook(dir, "post-tool-use", commit).is_none(),
+        "partly staged"
+    );
+    git(dir, &["checkout", "-q", "--", "decisions/D-0001.yml"]);
+
+    // Only the index changes, of a file the person is editing: reported right away.
+    std::fs::write(&path, format!("{record}# the person's work\n")).unwrap();
+    let staged = format!("{record}# sneaky\n");
+    let blob = {
+        let mut child = Command::new("git")
+            .args(["hash-object", "-w", "--stdin"])
+            .current_dir(dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(staged.as_bytes())
+            .unwrap();
+        String::from_utf8(child.wait_with_output().unwrap().stdout)
+            .unwrap()
+            .trim()
+            .to_owned()
+    };
+    let sneaky = bash("p2", "sh /tmp/stage.sh");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", sneaky.clone())), "");
+    git(
+        dir,
+        &[
+            "update-index",
+            "--cacheinfo",
+            &format!("100644,{blob},decisions/D-0001.yml"),
+        ],
+    );
+    let after = hook(dir, "post-tool-use", sneaky).expect("reported");
+    assert_eq!(after["decision"], "block");
+}
