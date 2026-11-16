@@ -1,0 +1,9 @@
+id: D-0003
+decision: Put decision records, scope, decision checks, manifests, extraction and agent messages in the `crates/ledger` (`ingrain-ledger`) crate, reusing `ingrain-core` for git/diff and `ingrain-engine` for ast-grep rather than duplicating them.
+scope:
+- crates/ledger/**
+category: architecture
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

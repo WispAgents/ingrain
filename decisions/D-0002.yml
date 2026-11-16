@@ -1,0 +1,10 @@
+id: D-0002
+decision: 'Keep the crate split: `core` holds types, rule format, store paths, git/diff helpers and language detection; `engine` wraps ast-grep; `learn` handles capture, clustering, synthesis, backtest and eval; `cli` holds the commands and hook adapters; `action/` is a composite GitHub Action that runs `ingrain check --diff`.'
+scope:
+- crates/**
+- action/**
+category: architecture
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

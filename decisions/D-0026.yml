@@ -1,0 +1,14 @@
+id: D-0026
+decision: Promote a rule out of shadow only with at least 3 confirmed hits and at least 50% of hits confirmed, where a confirmed hit is a later mined correction of the same file that removed the matched code.
+reason: Hit volume alone does not show a rule is right.
+rejected:
+- promoting shadow -> warn on hit volume alone
+scope:
+- crates/cli/src/cmd/rules/modes.rs
+- crates/cli/src/hitlog.rs
+category: constraint
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/commit/defac2efd9d6a29212e07918c061a2e9114a9378
+author: M0xoo
+date: 2026-11-16

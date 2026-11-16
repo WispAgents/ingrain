@@ -1,0 +1,14 @@
+id: D-0014
+decision: CI and pre-commit checks must use the rules, config and decisions from the base revision, not from the diff under check, and skip a broken base config or rule.
+reason: A diff must not be able to delete or shadow a rule and break it in the same change, while a broken base must still be fixable.
+rejected:
+- Using the rules and config from the changed revision
+scope:
+- crates/cli/**
+- action/action.yml
+category: architecture
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/pull/8
+author: M0xoo
+date: 2026-11-16

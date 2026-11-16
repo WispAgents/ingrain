@@ -1,0 +1,10 @@
+id: D-0021
+decision: Match scope globs with literal_separator so `*` does not cross `/`, while `**` does and a bare directory means everything under it.
+scope:
+- crates/ledger/src/scope.rs
+category: convention
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/commit/76d294d82ab891d83ee8c9c74b08f6863e014a18
+author: M0xoo
+date: 2026-11-16

@@ -1,0 +1,11 @@
+id: D-0010
+decision: Keep the git and diff helpers in crates/core independent of the user's git config.
+reason: Results must be the same on every machine, whatever the local git settings are.
+scope:
+- crates/core/**
+category: constraint
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/pull/1
+author: M0xoo
+date: 2026-11-15

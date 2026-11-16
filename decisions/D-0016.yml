@@ -1,0 +1,13 @@
+id: D-0016
+decision: Do not allow agents to edit `.corrections/config.yml` or `rejected.yml`.
+reason: Agents could otherwise disable or weaken enforcement.
+scope:
+- .corrections/config.yml
+- .corrections/rejected.yml
+- crates/cli/src/cmd/hook.rs
+category: constraint
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/pull/8
+author: M0xoo
+date: 2026-11-16

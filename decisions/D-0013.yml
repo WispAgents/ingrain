@@ -1,0 +1,12 @@
+id: D-0013
+decision: Make checks flag only lines added in the git diff, never existing code.
+rejected:
+- flagging existing code
+scope:
+- crates/cli/**
+- crates/engine/**
+category: constraint
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

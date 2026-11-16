@@ -1,0 +1,11 @@
+id: D-0019
+decision: Make `--from-plugin` hook invocations do nothing in repositories that have neither a `.corrections/` directory nor accepted decisions.
+reason: The plugin should only answer in repos that have been set up for ingrain.
+scope:
+- crates/cli/src/cmd/hook.rs
+category: constraint
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/commit/6cffdea0ce33e0a41de7cfff59fbe217826a8da8
+author: M0xoo
+date: 2026-11-15

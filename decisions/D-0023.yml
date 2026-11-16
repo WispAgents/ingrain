@@ -1,0 +1,13 @@
+id: D-0023
+decision: Count cluster support as distinct fix events (commit, review comment or session), not hunks.
+reason: Counting hunks inflates support.
+rejected:
+- counting hunks
+scope:
+- crates/learn/**
+- cluster
+category: convention
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

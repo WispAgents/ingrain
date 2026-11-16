@@ -1,0 +1,12 @@
+id: D-0028
+decision: 'Keep the repo packaged as a Claude Code plugin and its own marketplace: `.claude-plugin/marketplace.json` with plugin source `./`, `.claude-plugin/plugin.json`, and `hooks/hooks.json` running `ingrain hook <event> --from-plugin`.'
+reason: Users can install ingrain directly from the repo as a plugin.
+scope:
+- .claude-plugin/marketplace.json
+- .claude-plugin/plugin.json
+- hooks/hooks.json
+category: architecture
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

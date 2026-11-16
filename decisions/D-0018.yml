@@ -1,0 +1,13 @@
+id: D-0018
+decision: Make edits that add an `ingrain-ignore`/`decisions-ignore` comment ask the person, and have CI emit a warning annotation per override on added lines.
+reason: Overrides must be visible to humans.
+scope:
+- crates/cli/src/hooks.rs
+- crates/cli/src/check.rs
+- action/action.yml
+category: constraint
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/commit/25d4e95175761d69512aa396006def4aec2974ae
+author: M0xoo
+date: 2026-11-16

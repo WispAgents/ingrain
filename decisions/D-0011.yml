@@ -1,0 +1,12 @@
+id: D-0011
+decision: 'Namespace CLI commands: decision commands go under `ingrain decisions <...>` and learned-rule commands under `ingrain rules <...>`.'
+reason: The user asked for both groups to be namespaced.
+rejected:
+- top-level learned-rule commands
+scope:
+- crates/cli/**
+category: api_change
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

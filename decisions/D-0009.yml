@@ -1,0 +1,21 @@
+id: D-0009
+decision: Look up external programs (claude, gh, the editor) through `ingrain_core::process`, which honors PATHEXT, rather than spawning them by bare name.
+reason: On Windows, npm installs claude as `claude.cmd`, which is only found through PATHEXT lookup.
+scope:
+- crates/**
+category: convention
+status: accepted
+checks:
+  forbid_patterns:
+  - language: Rust
+    pattern: Command::new("claude")
+  - language: Rust
+    pattern: std::process::Command::new("claude")
+  - language: Rust
+    pattern: Command::new("gh")
+  - language: Rust
+    pattern: std::process::Command::new("gh")
+sources:
+- https://github.com/WispAgents/ingrain/pull/6
+author: M0xoo
+date: 2026-11-15

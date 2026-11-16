@@ -1,0 +1,10 @@
+id: D-0006
+decision: 'Use an LLM only for writing rules, through one of three backends: the `claude` CLI headless (default), the Anthropic Messages API over raw HTTP with `claude-opus-5-5` when `ANTHROPIC_API_KEY` is set, or `none`.'
+reason: The default reuses the user's Claude Code login.
+scope:
+- crates/learn/**
+category: architecture
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

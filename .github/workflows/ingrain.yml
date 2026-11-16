@@ -1,0 +1,10 @@
+name: ingrain
+on: pull_request
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      # Pinned release, not ./action: a PR must not be able to change the check that judges it.
+      - uses: WispAgents/ingrain/action@v0.2.3

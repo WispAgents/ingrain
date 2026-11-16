@@ -1,0 +1,19 @@
+id: D-0008
+decision: Implement the review UI as a line-based interactive prompt plus non-interactive subcommands, without a TUI framework.
+rejected:
+- TUI framework
+scope:
+- crates/**
+category: constraint
+status: accepted
+checks:
+  forbid_deps:
+  - ratatui
+  - crossterm
+  - cursive
+  - dialoguer
+  - inquire
+  - tui
+sources:
+- PLAN.md
+date: 2026-11-16

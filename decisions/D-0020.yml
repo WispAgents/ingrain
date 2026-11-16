@@ -1,0 +1,12 @@
+id: D-0020
+decision: Make a `--from-plugin` hook do nothing when the repo's `.claude/settings.json` already runs ingrain.
+reason: So hooks never run twice.
+scope:
+- crates/cli/src/cmd/hook.rs
+- hooks/hooks.json
+- ingrain hook
+category: constraint
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

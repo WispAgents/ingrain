@@ -1,0 +1,182 @@
+- decision: Keep the README's Install section before 'Use it from your coding agent', and write the skills on the assumption that ingrain is already installed (the setup skill may still install it if it is missing).
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: When mining corrections, skip formatter commits and cosmetic hunks.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Protect `.corrections/config.yml` and `rejected.yml` as reviewed files, run the reviewed-file deny before config loads, and fall back to the default config in hooks when the config is broken.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Use the single shared comment-line helper for both rule and decision override comments.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Cluster corrections by language family plus the sorted set of removed salient tokens (identifier-like tree-sitter leaves), and count pure additions as not a pattern.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Start a rule's precision window only once it becomes learnable (its 3rd distinct fix).
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Generate git diffs that don't depend on the user's git config (prefixes, quoted paths), with rename detection on.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Keep the post-edit hook to at most 2 git spawns (one rev-parse, diff first, ls-files only for new files).
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Treat heredoc bodies as data, not commands, in the Bash lexer.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: When deduplicating extracted decisions, preserve negation polarity and numbers/versions, and never drop a proposal that supersedes a live decision as a duplicate.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Put learned-rule commands under `ingrain rules` (mine, propose, review, accept, reject, list, mode, promote, eval) instead of making them top-level commands.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Run the CI test suite on windows-latest in addition to ubuntu and macOS.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: '`rules propose` and `rules eval` take `--min-corrections N`, which defaults to config `min_support`, and the default `min_support` is 1.'
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In the GitHub Action, pass inputs via env, verify the release checksum, and fall back to the default branch when the base is empty.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: 'Classify commits as agent commits using trailers and bot authors (e.g. `Co-Authored-By: Claude`, `Generated with Claude Code`, Codex, `copilot-swe-agent[bot]`), and exclude dependency bots from human commits.'
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Detect existing repo hooks by parsing hook commands (both the current and the v0.1 forms, including paths under CLAUDE_PROJECT_DIR), and do not treat permission rules as evidence of a hook.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Never let hook state/log write failures drop a decided answer, and show a Stop give-up to the person via systemMessage.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Support Windows (x86_64 and aarch64 MSVC), and publish release zips that contain `ingrain.exe` alongside the other targets.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: For agents without hooks, `ingrain init --agents-md` must write a marked, idempotent ingrain block into AGENTS.md.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Keep the ledger study material under docs/ledger-study/.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Bash hooks must ask before a command writes reviewed files or skips hooks, and must check changed files after the command runs.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Keep the build plan and its progress in PLAN.md as the single source of truth, and do not rely on agent memory for it.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Do not put more work into learning lint rules from git history; treat the enforcement layer (hooks, pre-commit, CI check) as the core of the product.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: When `ingrain init` removes legacy hooks, match exact commands only.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In the GitHub Action, fail clearly when the diff base cannot be determined instead of silently checking nothing.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Accept a candidate rule only if it matches at least min_support befores on the changed lines, matches zero afters, and reaches the precision threshold on known agent hunks. Retry LLM synthesis with backtest feedback at most 3 times.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: When widening hook matchers, rewrite only ingrain's own hook group, and move ingrain's command out of a shared group.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: 'Treat decision-ledger as part of ingrain: ship one binary, one set of hooks, one check and one Action, and don''t maintain a separate decision-ledger repo.'
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: 'Ship three skills: `ingrain-setup` (install the binary, init, seed decisions from AGENTS.md, review with the user), `ingrain-decide` (record or change a decision from the conversation) and `ingrain-rules` (mine and review learned rules).'
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Report and skip a broken config or rule at the base revision instead of failing the check.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Hold back single-fix rules, listing the reason, when the banned code is still used 5+ times, the name is generic (e.g. `r3`, `data`, `.append`), or every fix was in test code. `rules propose --all` keeps them.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In tests, build PATH with `std::env::join_paths`, and on Windows make fake executables such as `claude` into `.cmd` files.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In AGENTS.md editing, refuse to proceed when a start marker has no matching end marker after it.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Skip formatter-only changes when capturing corrections.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Allow a single correction to propose a rule even with no agent code to measure precision on, and reject on precision only for counter-evidence (hits on agent code humans kept); a fix's own hunks never count as its evidence.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Keep a single git helper in `ingrain-core::git` (the ledger's improved version with relative_in_repo, before_rev, -w and end-of-options).
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In the release workflow, grant write permission only to the publish job, and on PRs that change the workflow, build without publishing.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Keep all session state (shown, edited, stop attempts) in one session state file.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Apply a `decisions-ignore` comment on the line above to the next line only when the comment is alone on its line; a trailing ignore comment covers only its own line.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Have Bash PostToolUse block when a command changed or deleted a reviewed file it was not approved for, and snapshot asked commands too.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Store proposals in `.corrections/pending/` (gitignored), accepted rules in `.corrections/rules/`, rejected rules in `.corrections/rejected.yml`, and local data such as corrections and the hit log in `.git/ingrain/`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Use the quote-aware lexer for the Bash pre-check, and count redirects only when they target reviewed paths.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Build release binaries for macOS and Linux on both x86_64 and arm64.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: When the repo config is broken, have the plugin hook report the error instead of exiting silently.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Don't quote the public-repo validation verdict in the README; keep the study in docs/validation.md.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In the GitHub Action, diff from `github.event.before` on push events.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: When the backstop detects a changed reviewed file, stop the agent and show the person a systemMessage instead of telling the agent to restore the file.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Collapse `..` in hook paths before resolving them against protected paths.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Label each proposed rule as "single fix" or "repeated (N fixes)" in output.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Key transcript corrections by session, so one chat counts as one fix event.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Make the Stop hook check only the files the current session edited.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Treat ingrain config as protected, and have CI and pre-commit pin rules and config to the base branch.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In validate.sh, cap mining at the newest 6000 commits per repo and support resuming.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: 'Measure precision over agent hunks: a hit on lines a human later corrected is a TP, and a hit on agent lines that were kept is an FP.'
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Ask the person before accepting an edit that adds an `ingrain-ignore` or `decisions-ignore` override, and have CI emit a warning annotation for each override.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Have `decisions extract` skip the marked ingrain block that `ingrain init --agents-md` writes into AGENTS.md.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Run decision checks on manifests that ast-grep can't parse (Cargo.toml, go.mod, requirements.txt) in pre-commit, CI and the Stop hook.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Keep the repeat statistic in `rules eval` at a fixed threshold of 3 corrections, independent of `--min-corrections`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Validate Ingrain with a time-split replay on real public repos before calling it valuable.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Have `ingrain check` run learned rules and decision checks together for pre-commit, CI and the Action.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Make a `.env` scope also match `.env.*` variants such as `.env.local`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Use `ingrain hook <session-start|pre-tool-use|post-tool-use|stop>` for agent hooks instead of `ingrain check --hook`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Use the strict rule gate (Wilson lower bound plus required evidence) by default.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: 'Hook behavior: session-start shows repo-wide decisions; pre-tool-use denies edits that break decision checks and otherwise shows scoped decisions once per session; post-tool-use runs learned rules; stop runs both, on edited files only.'
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Put decision-ledger commands under `ingrain decisions <subcommand>`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Try deterministic template rules (banned call, banned identifier) before falling back to the LLM during rule synthesis.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Gate rule proposals on the 90% Wilson lower bound of precision, and propose a rule only if it has fired on agent code.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In `process::find`, do not search PATH for names that contain a path separator, and skip non-executable files on Unix.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Install the pre-commit hook at the path from `git rev-parse --git-path hooks`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Require every proposed rule to pass the backtest and human review, whatever the minimum-correction threshold is.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: 'Keep the Rust workspace split into crates: core (model, rule files, git), engine (ast-grep), learn (capture, cluster, synth, backtest, eval) and cli.'
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Do not let a `*` in scope globs match across `/`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Have the Bash PreToolUse hook ask the person before commands that could write accepted decisions, rules or config, run ledger-changing ingrain subcommands, or bypass hooks (`git commit --no-verify`).
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Count a true positive only when it is about what the human fixed, and use the shared `judge()` in both backtest and eval.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In `ingrain rules eval`, learn only from data before the cutoff T, freeze the rules, and score recall and lower-bound precision only on data after T.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Use the `claude` CLI as the default LLM backend for rule synthesis; do not require an API key in the environment.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: The Stop hook judges only files the session edited, hooks do nothing when ingrain isn't installed, and hook git spawns are kept to a minimum.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Do not let ledger deduplication merge decisions that differ in negation or numbers, and never drop supersedes links when deduplicating.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Have the GitHub Action download the prebuilt release binary instead of compiling ingrain from source.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Require confirmed hits (later corrected by a human) for `rules promote` to take a rule out of shadow, not hit volume.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Ship learned rules and the decision ledger as one ingrain binary with one set of hooks, and have `ingrain check` run learned rules and decision checks together.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Hold a cluster's own source hunks out of the precision population (leave-one-fix-event-out), and count true positives per correction, not per line, in backtest and `rules eval`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Keep whitespace in mining diffs, but ignore whitespace in checks.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Hold back single-fix rules that look like one-offs (code still used 5+ times, a generic name, or every fix in test code), listing the reason, unless `--all` is passed.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Treat scope entries that are file names (.env, .github, Makefile, Dockerfile, README, Cargo.lock, go.mod, ...) as path globs matching that name in any directory, and treat dotted module names (e.g. payments.client) as symbols.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: When seeding decisions from AGENTS.md, skip ingrain's own marked block.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Launch the editor through the shared `process::edit`, which splits $VISUAL/$EDITOR into a program and its arguments and defaults to notepad on Windows; do not reimplement editor launching in each review command.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In ledger scopes, `*` matches within one directory only, and plain file names are valid scopes.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Mine corrections by blaming the lines removed in human commits at `H^` and attributing them to agent commits within a window (default 14 days). Skip human commits that change more than 20 files or more than 400 lines.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: Stop investing in learning rules from git history; in-session transcript corrections are the remaining open signal.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
+- decision: In pre-commit and CI, load decisions, learned rules and config from the base revision, and flag changes under `.corrections/`.
+  reason: duplicate of an accepted decision or too granular (one-time fix detail / study note)
