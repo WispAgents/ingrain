@@ -66,18 +66,20 @@ pub fn needs_approval(command: &str) -> Option<String> {
         if let Some(why) = ledger_command(&words) {
             return Some(why);
         }
-        if let Some(why) = skips_hooks(&words) {
+        if let Some(why) = skips_hooks(seg) {
             return Some(why);
         }
     }
+    // A command substitution inside quotes isn't split out; don't trust it near reviewed paths.
+    let lower = command.to_lowercase();
+    let substitution = (command.contains("$(") || command.contains('`'))
+        && (lower.contains("decisions") || lower.contains(".corrections"));
     let mut in_protected_dir = false;
     let mut mentions = false;
     let mut all_read = true;
     for seg in &segments {
-        let Some(program) = seg.words.first() else {
-            continue;
-        };
-        let program = base_name(program);
+        // A segment can be only a redirect (`> decisions/D-0001.yml`).
+        let program = seg.words.first().map_or("", |w| base_name(w));
         let skip = commit_message_values(&seg.words);
         let named = seg
             .words
@@ -93,9 +95,9 @@ pub fn needs_approval(command: &str) -> Option<String> {
             .iter()
             .any(|t| is_protected(t) || (in_protected_dir && !t.starts_with('/')));
         mentions |= named || writes_protected || in_protected_dir;
-        all_read &= !writes_protected && reads_only(program, &seg.words);
+        all_read &= !writes_protected && (program.is_empty() || reads_only(program, &seg.words));
     }
-    (mentions && !all_read).then(|| {
+    (mentions && (!all_read || substitution)).then(|| {
         "This command may change accepted decisions, learned rules or ingrain's config, which \
          people review. Agents propose changes with `ingrain decisions add --propose` or \
          `ingrain decisions supersede`."
@@ -130,35 +132,86 @@ fn reads_only(program: &str, words: &[String]) -> bool {
     READ_ONLY.contains(&program) && !writes_with(program, words)
 }
 
-/// `git commit` without its pre-commit hook: `--no-verify`, `-n`, or hooks pointed elsewhere.
-fn skips_hooks(words: &[&str]) -> Option<String> {
+/// `git commit` without its pre-commit hook: `--no-verify` (or a prefix git accepts, like
+/// `--no-ver`), `-n` in a flag cluster, or hooks pointed elsewhere (`core.hooksPath` via `-c`,
+/// `--config-env` or `GIT_CONFIG_*`).
+fn skips_hooks(seg: &Segment) -> Option<String> {
+    let words = &seg.words;
     if !words.first().is_some_and(|w| base_name(w) == "git") {
         return None;
     }
-    let owned: Vec<String> = words.iter().map(|w| (*w).to_owned()).collect();
     let config_hooks = words
         .iter()
-        .any(|w| w.to_lowercase().starts_with("core.hookspath"));
-    let (sub, rest) = git_subcommand(&owned);
-    // `-m <msg>` / `-am <msg>` / `-F <file>`: the next word is a value, not an option.
-    let takes_value = |w: &str| {
-        matches!(w, "--message" | "--file")
-            || (w.starts_with('-')
-                && !w.starts_with("--")
-                && (w.ends_with('m') || w.ends_with('F')))
-    };
+        .chain(&seg.env)
+        .any(|w| w.to_lowercase().contains("hookspath"))
+        || seg.env.iter().any(|w| w.starts_with("GIT_CONFIG_"))
+        || words.iter().any(|w| w.starts_with("--config-env"));
+    let (sub, rest) = git_subcommand(words);
+    let values = commit_values(rest);
     let no_verify = sub == Some("commit")
         && rest.iter().enumerate().any(|(i, w)| {
-            let is_value = i > 0 && takes_value(&rest[i - 1]);
-            !is_value
-                && (w == "--no-verify"
-                    || (w.starts_with('-') && !w.starts_with("--") && w[1..].contains('n')))
+            if values.contains(&i) {
+                return false;
+            }
+            if let Some(long) = w.strip_prefix("--") {
+                return long.len() >= 4 && "no-verify".starts_with(long);
+            }
+            w.strip_prefix('-')
+                .is_some_and(|flags| short_flags(flags).contains('n'))
         });
     (no_verify || config_hooks).then(|| {
         "This skips ingrain's pre-commit check of decisions and rules (`--no-verify`, `-n` or \
          `core.hooksPath`)."
             .to_owned()
     })
+}
+
+/// `git commit` short options that take a value; after one, the rest of the cluster (or the
+/// next word) is that value.
+const COMMIT_VALUE_FLAGS: &[char] = &['m', 'F', 'c', 'C', 't', 'u', 'S'];
+
+/// The flags of a short-option cluster up to the first value-taking one, inclusive.
+fn short_flags(cluster: &str) -> &str {
+    match cluster.find(COMMIT_VALUE_FLAGS) {
+        Some(i) => &cluster[..=i],
+        None => cluster,
+    }
+}
+
+/// Indexes (into `rest`, the words after `commit`) of option values: messages, files, keys.
+fn commit_values(rest: &[String]) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (i, w) in rest.iter().enumerate() {
+        if out.contains(&i) {
+            continue;
+        }
+        if let Some(long) = w.strip_prefix("--") {
+            if matches!(
+                long,
+                "message"
+                    | "file"
+                    | "template"
+                    | "reuse-message"
+                    | "reedit-message"
+                    | "author"
+                    | "date"
+                    | "fixup"
+                    | "squash"
+                    | "trailer"
+            ) {
+                out.push(i + 1);
+            }
+            continue;
+        }
+        if let Some(flags) = w.strip_prefix('-') {
+            let head = short_flags(flags);
+            // `-am` + next word; `-m"msg"` carries its value.
+            if head.ends_with(COMMIT_VALUE_FLAGS) && head.len() == flags.len() {
+                out.push(i + 1);
+            }
+        }
+    }
+    out
 }
 
 /// The git subcommand and the words after it, skipping global options (`-C dir`, `-c k=v`).
@@ -177,17 +230,30 @@ fn git_subcommand(words: &[String]) -> (Option<&str>, &[String]) {
     (None, &[])
 }
 
-/// Indexes of `git commit -m <msg>` values, whose text isn't a path.
+/// Indexes of `git commit` option values (messages), whose text isn't a path.
 fn commit_message_values(words: &[String]) -> Vec<usize> {
-    if base_name(&words[0]) != "git" || git_subcommand(words).0 != Some("commit") {
+    if words.is_empty() || base_name(&words[0]) != "git" {
         return Vec::new();
     }
-    words
-        .iter()
-        .enumerate()
-        .filter(|(_, w)| matches!(w.as_str(), "-m" | "--message"))
-        .map(|(i, _)| i + 1)
-        .collect()
+    let (sub, rest) = git_subcommand(words);
+    if sub != Some("commit") {
+        return Vec::new();
+    }
+    let offset = words.len() - rest.len();
+    let mut out: Vec<usize> = commit_values(rest)
+        .into_iter()
+        .map(|i| i + offset)
+        .collect();
+    // Attached values: `--message=...`, `-m"..."`.
+    for (i, w) in rest.iter().enumerate() {
+        let attached = w.starts_with("--message=")
+            || w.strip_prefix('-')
+                .is_some_and(|f| !f.starts_with('-') && short_flags(f).len() < f.len());
+        if attached {
+            out.push(i + offset);
+        }
+    }
+    out
 }
 
 /// `ingrain` subcommands that accept, reject or retune what people review.
@@ -221,6 +287,8 @@ fn ledger_command(words: &[&str]) -> Option<String> {
 struct Segment {
     words: Vec<String>,
     redirects: Vec<String>,
+    /// Leading `VAR=value` assignments and wrappers, removed from `words`.
+    env: Vec<String>,
 }
 
 /// Split a shell line into simple commands on `;`, `&`, `|`, newlines, `(`, `)` and backticks,
@@ -232,6 +300,7 @@ fn lex(command: &str) -> Vec<Segment> {
     let mut word = String::new();
     let mut has_word = false;
     let mut redirect_next = false;
+    let mut heredoc: Option<String> = None;
     let mut chars = command.chars().peekable();
     let finish_word = |segments: &mut Vec<Segment>,
                        word: &mut String,
@@ -314,10 +383,58 @@ fn lex(command: &str) -> Vec<Segment> {
             '&' if chars.peek() == Some(&'>') => {
                 finish_word(&mut segments, &mut word, &mut has_word, &mut redirect_next);
             }
-            '<' => finish_word(&mut segments, &mut word, &mut has_word, &mut redirect_next),
+            '<' => {
+                finish_word(&mut segments, &mut word, &mut has_word, &mut redirect_next);
+                if chars.peek() == Some(&'<') {
+                    chars.next();
+                    if chars.peek() == Some(&'<') {
+                        chars.next(); // here-string: the word that follows is data
+                        continue;
+                    }
+                    if chars.peek() == Some(&'-') {
+                        chars.next();
+                    }
+                    while chars
+                        .peek()
+                        .is_some_and(|c| c.is_whitespace() && *c != '\n')
+                    {
+                        chars.next();
+                    }
+                    let mut delim = String::new();
+                    while let Some(&c) = chars.peek() {
+                        if c.is_whitespace() || matches!(c, ';' | '&' | '|' | '>' | '<' | '(' | ')')
+                        {
+                            break;
+                        }
+                        chars.next();
+                        if !matches!(c, '\'' | '"' | '\\') {
+                            delim.push(c);
+                        }
+                    }
+                    if !delim.is_empty() {
+                        heredoc = Some(delim);
+                    }
+                }
+            }
             ';' | '&' | '|' | '\n' | '(' | ')' | '`' => {
                 finish_word(&mut segments, &mut word, &mut has_word, &mut redirect_next);
                 redirect_next = false;
+                // A heredoc body is data, not commands: skip to its closing line.
+                if c == '\n'
+                    && let Some(delim) = heredoc.take()
+                {
+                    let mut line = String::new();
+                    for h in chars.by_ref() {
+                        if h == '\n' {
+                            if line.trim() == delim {
+                                break;
+                            }
+                            line.clear();
+                        } else {
+                            line.push(h);
+                        }
+                    }
+                }
                 segments.push(Segment::default());
             }
             c if c.is_whitespace() => {
@@ -342,9 +459,9 @@ fn lex(command: &str) -> Vec<Segment> {
                     )
             })
             .count();
-        seg.words.drain(..lead);
+        seg.env = seg.words.drain(..lead).collect();
     }
-    segments.retain(|s| !s.words.is_empty() || !s.redirects.is_empty());
+    segments.retain(|s| !s.words.is_empty() || !s.redirects.is_empty() || !s.env.is_empty());
     segments
 }
 
@@ -368,7 +485,12 @@ pub fn snapshot(git: &Git) -> BTreeMap<String, String> {
         }
         let (status, path) = (&entry[..2], &entry[3..]);
         if status.contains('R') || status.contains('C') {
-            entries.next(); // the old path
+            // The old path of a rename is gone from the tree.
+            if let Some(old) = entries.next()
+                && status.contains('R')
+            {
+                files.insert(old.to_owned(), "deleted".to_owned());
+            }
         }
         files.insert(path.to_owned(), stamp(&git.root().join(path)));
     }
@@ -389,13 +511,36 @@ fn stamp(path: &Path) -> String {
     }
 }
 
-/// Files that changed between two snapshots, deleted ones included.
+/// Files that changed between two snapshots: new or different stamps, deleted ones, and ones
+/// that dropped out of `git status` (stashed, reset, checked out, committed).
 pub fn changed(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>) -> Vec<String> {
-    after
+    let mut out: Vec<String> = after
         .iter()
         .filter(|(path, stamp)| before.get(*path) != Some(stamp))
         .map(|(path, _)| path.clone())
-        .collect()
+        .collect();
+    out.extend(before.keys().filter(|p| !after.contains_key(*p)).cloned());
+    out.sort();
+    out
+}
+
+/// The commit `HEAD` points at.
+pub fn head(git: &Git) -> Option<String> {
+    git.try_run(&["rev-parse", "--verify", "-q", "HEAD"])
+        .map(|s| s.trim().to_owned())
+}
+
+/// Files commits between `from` and `to` touched, when a command moved `HEAD` (commit,
+/// revert, cherry-pick, reset, pull…).
+pub fn moved(git: &Git, from: &str, to: &str) -> Vec<String> {
+    git.try_run(&["diff", "--name-only", "-z", "--no-renames", from, to, "--"])
+        .map(|out| {
+            out.split('\0')
+                .filter(|p| !p.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -443,6 +588,14 @@ mod tests {
             "git commit -anm x",
             "git -c core.hooksPath=/dev/null commit -m x",
             "ls decisions | xargs rm",
+            // Second review.
+            "git commit --no-veri -m x",
+            "X=/dev/null git --config-env=core.hooksPath=X commit -m x",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+            "> decisions/D-0001.yml",
+            "true; > decisions/D-0001.yml",
+            "echo \"$(rm decisions/D-0001.yml)\"",
+            "cat <<'EOF' > decisions/D-0001.yml\nstatus: superseded\nEOF",
         ] {
             assert!(needs_approval(cmd).is_some(), "{cmd}");
         }
@@ -474,6 +627,14 @@ mod tests {
             "git -C . log decisions/",
             "cat decisions/D-0001.yml >&2",
             "git commit -am 'fix: x'",
+            // Second review.
+            "git commit -am 'explain decisions/ layout'",
+            "git commit -qm 'see decisions/'",
+            "git commit --message='decisions/ docs'",
+            "git commit -m\"fix decisions/ docs\"",
+            "git commit -uno -m x",
+            "cat > /tmp/notes <<'EOF'\nsee decisions/D-0001.yml and rm it\nEOF",
+            "cat decisions/D-0001.yml 2>/dev/null",
         ] {
             assert!(needs_approval(cmd).is_none(), "{cmd}");
         }
@@ -502,5 +663,8 @@ mod tests {
         ]
         .into();
         assert_eq!(changed(&before, &after), vec!["b", "c", "d"]);
+        // Files that dropped out of `git status` (stashed, reset) changed too.
+        let cleaned: BTreeMap<String, String> = [("a".into(), "1:1".into())].into();
+        assert_eq!(changed(&before, &cleaned), vec!["b"]);
     }
 }

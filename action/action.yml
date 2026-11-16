@@ -53,8 +53,14 @@ runs:
         # Outside pull requests there's no PR base. On a push, check what the push added; else
         # (workflow_dispatch, a new branch) compare with the default branch.
         if [ -z "$INGRAIN_BASE" ] && [ -n "$PUSH_BEFORE" ] \
-          && [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ] \
-          && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+          && [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]; then
+          # A shallow checkout doesn't have it yet.
+          git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null \
+            || git fetch --no-tags --quiet --depth=1 origin "$PUSH_BEFORE" || true
+          if ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            echo "::error::commit $PUSH_BEFORE (before the push) not found; check out with fetch-depth: 0"
+            exit 1
+          fi
           INGRAIN_BASE="$PUSH_BEFORE"
         fi
         if [ -z "$INGRAIN_BASE" ]; then

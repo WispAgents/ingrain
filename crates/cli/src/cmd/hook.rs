@@ -126,6 +126,7 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
                     time: crate::session::now(),
                     files: bash::snapshot(&repo.git),
                     asked: bash_ask.is_some(),
+                    head: bash::head(&repo.git),
                 };
                 session.bash.insert(id.clone(), snap);
             }
@@ -279,7 +280,14 @@ fn post_tool_use(
         else {
             return Ok(None);
         };
-        let changed = bash::changed(&before.files, &bash::snapshot(&repo.git));
+        let mut changed = bash::changed(&before.files, &bash::snapshot(&repo.git));
+        if let (Some(from), Some(to)) = (&before.head, bash::head(&repo.git))
+            && *from != to
+        {
+            changed.extend(bash::moved(&repo.git, from, &to));
+            changed.sort();
+            changed.dedup();
+        }
         // The pre-check reads shell syntax and can be fooled (variables, globs); this sees
         // what actually changed. Commands the person approved may change reviewed files.
         let reviewed: Vec<&String> = changed
@@ -287,13 +295,21 @@ fn post_tool_use(
             .filter(|p| bash::is_reviewed_file(p))
             .collect();
         if !before.asked && !reviewed.is_empty() {
+            // The person may have edited it meanwhile, so don't tell the agent to restore it.
             let list: Vec<String> = reviewed.iter().map(|p| format!("`{p}`")).collect();
-            return Ok(Some(json!({ "decision": "block", "reason": format!(
-                "That command changed {}, which people review; agents don't edit it. Restore it \
-                 (`git checkout -- <path>`) and tell the user. {}",
-                list.join(", "),
-                reviewed_message(reviewed[0]).split_once(". ").map_or("", |(_, rest)| rest)
-            ) })));
+            let list = list.join(", ");
+            return Ok(Some(json!({
+                "decision": "block",
+                "reason": format!(
+                    "{list} changed while that command ran; people review these files and agents \
+                     don't edit them. If your command changed them, stop and tell the user what it \
+                     did so they can keep or undo it. Don't edit or restore them yourself. {}",
+                    reviewed_message(reviewed[0]).split_once(". ").map_or("", |(_, rest)| rest)
+                ),
+                "systemMessage": format!(
+                    "ingrain: {list} changed while the agent ran a shell command. Check the change."
+                ),
+            })));
         }
         changed
             .into_iter()

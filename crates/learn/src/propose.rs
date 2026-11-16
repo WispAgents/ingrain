@@ -113,10 +113,20 @@ pub fn is_test_path(path: &str) -> bool {
             "test" | "tests" | "__tests__" | "spec" | "testdata" | "fixtures"
         )
     }) || name.starts_with("test_")
+        || name.starts_with("test.")
+        || name.starts_with("tests.")
         || name.contains("_test.")
+        || name.contains("_tests.")
+        || name.contains("_spec.")
         || name.contains(".test.")
         || name.contains(".spec.")
         || name.starts_with("conftest.")
+        // `FooTest.java`, `FooTests.cs`: the original case, since `contest.` isn't a test.
+        || {
+            let orig = path.rsplit('/').next().unwrap_or(path);
+            let stem = orig.split('.').next().unwrap_or(orig);
+            stem.len() > 4 && (stem.ends_with("Test") || stem.ends_with("Tests"))
+        }
 }
 
 fn is_generic_name(token: &str) -> bool {
@@ -611,6 +621,17 @@ mod tests {
         assert!(single_fix_concern(&anchor("PluginSQL"), 0, true).is_some());
         assert!(is_test_path("tests/test_api.py") && is_test_path("src/a.spec.ts"));
         assert!(!is_test_path("src/testing_utils.py") && !is_test_path("datasette/app.py"));
+        for p in [
+            "app/tests.py",
+            "test.py",
+            "foo_tests.py",
+            "src/FooTest.java",
+            "FooTests.cs",
+            "lib/foo_spec.rb",
+        ] {
+            assert!(is_test_path(p), "{p}");
+        }
+        assert!(!is_test_path("src/Contest.java") && !is_test_path("src/latest.ts"));
     }
 
     #[test]

@@ -29,6 +29,9 @@ pub struct BashSnapshot {
     /// The person was asked to approve this command (so it may change reviewed files).
     #[serde(default)]
     pub asked: bool,
+    /// `HEAD` before the command, to see commits it made or undid.
+    #[serde(default)]
+    pub head: Option<String>,
 }
 
 impl Session {

@@ -663,6 +663,21 @@ fn enforcement_gaps_shell_config_overrides_and_ci() {
     );
     git(dir, &["checkout", "-q", "--", "decisions/D-0001.yml"]);
 
+    // A command that moves HEAD (revert, cherry-pick, reset) leaves no uncommitted trace.
+    let revert = bash("t6", "git revert --no-edit HEAD");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", revert.clone())), "");
+    git(dir, &["rm", "-q", "decisions/D-0001.yml"]);
+    git(dir, &["commit", "-qm", "drop D-0001", "--no-verify"]);
+    let after = hook(dir, "post-tool-use", revert).expect("post hook answers");
+    assert_eq!(after["decision"], "block");
+    assert!(
+        after["systemMessage"]
+            .as_str()
+            .unwrap()
+            .contains("decisions/D-0001.yml")
+    );
+    git(dir, &["reset", "-q", "--hard", "HEAD~1"]);
+
     // The config is reviewed too, and a broken one doesn't switch the hooks off.
     let config = json!({"session_id": "c", "cwd": dir, "tool_name": "Write",
         "tool_input": {"file_path": dir.join(".corrections/config.yml"), "content": "ignore: ['[']\n"}});
