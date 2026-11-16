@@ -328,9 +328,13 @@ impl<'a> History<'a> {
             let Some((name, c)) = entry.split_once(' ') else {
                 continue;
             };
+            // ORIG_HEAD is where a reset, merge or rebase started: history only for a command
+            // that moved HEAD itself (`rebase --continue`), not for a restore from it.
+            if name == "ORIG_HEAD" && !moved_head {
+                continue;
+            }
             if refs.existed(git, c) {
                 history.commits.push(c.to_owned());
-                // ORIG_HEAD is only where something started, not content it brings in.
                 if name != "ORIG_HEAD" {
                     history.pending.push(c.to_owned());
                 }

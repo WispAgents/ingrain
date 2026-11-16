@@ -919,12 +919,20 @@ pub fn parse_tips(lines: &[String]) -> BTreeMap<String, String> {
 /// remote-tracking refs (`pull_too`), not for the branch the pull merged into. Read from the
 /// reflog file: a fetch can update thousands of refs, too many to ask git one by one.
 pub fn fetched(git: &Git, name: &str, pull_too: bool) -> bool {
-    let subject = common_dir(git)
-        .and_then(|dir| std::fs::read_to_string(dir.join("logs").join(name)).ok())
-        .and_then(|log| {
-            let last = log.lines().rev().find(|l| !l.trim().is_empty())?.to_owned();
-            last.split_once('\t').map(|(_, subject)| subject.to_owned())
-        });
+    let dir = common_dir(git);
+    let subject = match &dir {
+        // Reftable repos (git 2.45+) keep reflogs inside the ref store: ask git.
+        Some(dir) if !dir.join("logs").is_dir() => git
+            .try_run(&["reflog", "show", "-1", "--format=%gs", name, "--"])
+            .map(|s| s.trim().to_owned()),
+        dir => dir
+            .as_ref()
+            .and_then(|dir| std::fs::read_to_string(dir.join("logs").join(name)).ok())
+            .and_then(|log| {
+                let last = log.lines().rev().find(|l| !l.trim().is_empty())?.to_owned();
+                last.split_once('\t').map(|(_, subject)| subject.to_owned())
+            }),
+    };
     subject.is_some_and(|m| {
         let m = m.trim_start();
         m.starts_with("fetch") || (pull_too && m.starts_with("pull"))

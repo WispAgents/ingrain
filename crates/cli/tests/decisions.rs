@@ -1699,3 +1699,35 @@ fn history_rule_edges_3() {
         );
     });
 }
+
+/// ORIG_HEAD (set by a pull, reset, merge) doesn't make a restore of an older decision
+/// version look like history.
+#[test]
+fn restoring_an_older_decision_is_reported() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    let path = dir.join("decisions/D-0001.yml");
+    let record = std::fs::read_to_string(&path).unwrap();
+    git(dir, &["checkout", "-qb", "up"]);
+    std::fs::write(&path, record.replace("in src", "in the app")).unwrap();
+    git(
+        dir,
+        &["commit", "-qam", "superseded upstream", "--no-verify"],
+    );
+    git(dir, &["checkout", "-q", "main"]);
+    // The person fast-forwards: ORIG_HEAD is the older version.
+    git(dir, &["merge", "-q", "--ff-only", "up"]);
+    let payload = json!({"session_id": "o", "cwd": dir, "tool_name": "Bash", "tool_use_id": "o1",
+        "tool_input": {"command": "git restore --source=HEAD~1 ."}});
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", payload.clone())), "");
+    git(dir, &["restore", "--source=HEAD~1", "."]);
+    let after = hook(dir, "post-tool-use", payload).expect("reported");
+    assert_eq!(after["decision"], "block");
+}
