@@ -5,6 +5,8 @@ members = ["crates/core", "crates/engine", "crates/learn", "crates/ledger", "cra
 [workspace.package]
 version = "0.2.3"
 edition = "2024"
+rust-version = "1.90"
+publish = false
 license = "Apache-2.0"
 repository = "https://github.com/WispAgents/ingrain"
 
