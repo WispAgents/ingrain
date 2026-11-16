@@ -439,13 +439,25 @@ fn skips_hooks(seg: &Segment) -> Option<String> {
     if !words.first().is_some_and(|w| base_name(w) == "git") {
         return None;
     }
-    let config_hooks = words
-        .iter()
-        .chain(&seg.env)
-        .any(|w| w.to_lowercase().contains("hookspath"))
-        || seg.env.iter().any(|w| w.starts_with("GIT_CONFIG_"))
-        || words.iter().any(|w| w.starts_with("--config-env"));
     let (sub, rest) = git_subcommand(words);
+    // `git config core.hooksPath`, `--get`, `--list`: reading it skips nothing.
+    let reads_config = sub == Some("config")
+        && words[1..words.len() - rest.len()]
+            .iter()
+            .all(|w| !w.to_lowercase().contains("hookspath"))
+        && (rest.iter().any(|w| {
+            matches!(
+                w.as_str(),
+                "--get" | "--get-all" | "--get-regexp" | "-l" | "--list" | "--show-origin"
+            )
+        }) || rest.iter().filter(|w| !w.starts_with('-')).count() == 1);
+    let config_hooks = !reads_config
+        && (words
+            .iter()
+            .chain(&seg.env)
+            .any(|w| w.to_lowercase().contains("hookspath"))
+            || seg.env.iter().any(|w| w.starts_with("GIT_CONFIG_"))
+            || words.iter().any(|w| w.starts_with("--config-env")));
     let values = commit_values(rest);
     let no_verify = sub == Some("commit")
         && rest.iter().enumerate().any(|(i, w)| {
@@ -1166,6 +1178,8 @@ mod tests {
             "git commit -n -m x",
             "git commit -anm x",
             "git -c core.hooksPath=/dev/null commit -m x",
+            "git config core.hooksPath /dev/null",
+            "git config --local core.hooksPath x",
             "ls decisions | xargs rm",
             // Second review.
             "git commit --no-veri -m x",
@@ -1254,6 +1268,7 @@ mod tests {
             "ingrain rules list; git stash list",
             "ingrain --repo . decisions for src/a.ts; git branch",
             "git status; git branch -vv; git remote -v; git diff decisions/D-0003.yml; git fetch origin",
+            "git config core.hooksPath; git config --get core.hooksPath || echo none",
             "ingrain decisions accept --help; ingrain rules mode -h",
             "ingrain decisions add --propose x 2>&1; \\\ningrain decisions add --propose y",
             "ls -R decisions; for f in decisions/pending/*; do echo \"== $f\"; cat \"$f\"; done",
