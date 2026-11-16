@@ -56,6 +56,168 @@ pub struct Proposal {
     pub score: Score,
 }
 
+impl Proposal {
+    /// Every correction it catches is in a test file.
+    pub fn only_tests(&self, corrections: &[Correction]) -> bool {
+        let caught: HashSet<&str> = self.caught.iter().map(String::as_str).collect();
+        let mut paths = corrections
+            .iter()
+            .filter(|c| caught.contains(c.id.as_str()))
+            .map(|c| c.path.as_str())
+            .peekable();
+        paths.peek().is_some() && paths.all(is_test_path)
+    }
+
+    /// Distinct fix events (commits, review comments, chats) among the corrections it catches.
+    pub fn fix_events(&self, corrections: &[Correction]) -> usize {
+        let caught: HashSet<&str> = self.caught.iter().map(String::as_str).collect();
+        corrections
+            .iter()
+            .filter(|c| caught.contains(c.id.as_str()))
+            .map(cluster::source_key)
+            .collect::<HashSet<_>>()
+            .len()
+    }
+}
+
+/// A single-fix rule bans what one person changed once. It's proposed (so a first run has
+/// something to review) unless it looks like a one-off: the banned code is still common in the
+/// repository today, or the banned name is too generic to mean anything (`r3`, `data`). Rules
+/// backed by repeated fixes are never held back here.
+pub fn single_fix_concern(anchor: &Anchor, head_hits: u32, only_tests: bool) -> Option<String> {
+    const STILL_COMMON: u32 = 5;
+    if only_tests {
+        return Some("learned from test code only (fixtures and test data change often)".into());
+    }
+    if head_hits >= STILL_COMMON {
+        return Some(format!(
+            "still used {head_hits} times in the current code; looks like a one-off fix"
+        ));
+    }
+    if is_generic_name(&anchor.token) {
+        return Some(format!(
+            "`{}` is too generic to ban from a single fix",
+            anchor.token
+        ));
+    }
+    None
+}
+
+/// `tests/…`, `test_x.py`, `x_test.go`, `x.test.ts`, `x.spec.js`, `__tests__/…`.
+pub fn is_test_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    let name = lower.rsplit('/').next().unwrap_or(&lower);
+    lower.split('/').any(|d| {
+        matches!(
+            d,
+            "test" | "tests" | "__tests__" | "spec" | "testdata" | "fixtures"
+        )
+    }) || name.starts_with("test_")
+        || name.contains("_test.")
+        || name.contains(".test.")
+        || name.contains(".spec.")
+        || name.starts_with("conftest.")
+}
+
+fn is_generic_name(token: &str) -> bool {
+    const GENERIC: &[&str] = &[
+        "data",
+        "value",
+        "values",
+        "result",
+        "results",
+        "res",
+        "ret",
+        "err",
+        "error",
+        "item",
+        "items",
+        "self",
+        "this",
+        "name",
+        "temp",
+        "tmp",
+        "list",
+        "args",
+        "kwargs",
+        "obj",
+        "val",
+        "key",
+        "keys",
+        "idx",
+        "index",
+        "count",
+        "len",
+        "str",
+        "num",
+        "out",
+        "output",
+        "input",
+        "text",
+        "line",
+        "lines",
+        "path",
+        "file",
+        "msg",
+        "elem",
+        "node",
+        "foo",
+        "bar",
+        // Everyday methods: one fix doesn't make them wrong everywhere.
+        "append",
+        "extend",
+        "insert",
+        "remove",
+        "pop",
+        "push",
+        "sort",
+        "sorted",
+        "get",
+        "set",
+        "add",
+        "update",
+        "join",
+        "split",
+        "strip",
+        "replace",
+        "format",
+        "map",
+        "filter",
+        "reduce",
+        "find",
+        "concat",
+        "slice",
+        "splice",
+        "trim",
+        "includes",
+        "contains",
+        "lower",
+        "upper",
+        "startswith",
+        "endswith",
+        "print",
+        "log",
+        "len",
+        "range",
+        "open",
+        "read",
+        "write",
+        "close",
+        "call",
+        "apply",
+        "then",
+        "copy",
+        "clear",
+        "has",
+        "delete",
+        "test",
+    ];
+    let lower = token.to_lowercase();
+    let letters = lower.trim_end_matches(|c: char| c.is_ascii_digit() || c == '_');
+    // `x`, `r3`, `df`, `a1`: short throwaway locals.
+    letters.chars().count() <= 2 || GENERIC.contains(&letters)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProposeStats {
     pub corrections: usize,
@@ -146,18 +308,15 @@ pub fn propose(
             .map(|(_, &m)| cluster::source_key(&train[m]))
             .collect::<HashSet<_>>()
             .len();
-        // Precision is measured on agent code other than the cluster's own source hunks
-        // (see `backtest::score`). When the rule fired there, the Wilson bound decides.
-        // When it didn't (no agent hunks, e.g. transcript corrections, or only its own),
-        // there is no precision evidence and the corrections are all we have: a rule
-        // always catches the fix it was learned from, so it must catch at least two
-        // distinct fix events (commits, review comments, sessions). This is a floor
-        // under `min_support`, not a replacement: `--min-corrections 1` still proposes
-        // from one fix when that rule hits other agent code humans corrected.
-        let precise = match s.precision_lower_bound() {
-            Some(p) => p >= opts.min_precision,
-            None => caught_support >= 2,
-        };
+        // One correction is enough to propose a rule (`min_support`, default 1): people review
+        // every proposal and accepted rules start in shadow. Precision only rejects on
+        // counter-evidence: hits on agent code humans kept. It's measured on agent code other
+        // than the cluster's own source hunks (see `backtest::score`), so a fix never
+        // certifies itself; a rule with no hits elsewhere has no precision and isn't rejected
+        // for it.
+        let precise = s.false_hits == 0
+            || s.precision_lower_bound()
+                .is_none_or(|p| p >= opts.min_precision);
         caught_support >= opts.min_support && precise && s.after_rate() <= opts.max_after_rate
     };
 
@@ -434,6 +593,27 @@ mod tests {
     }
 
     #[test]
+    fn single_fix_rules_must_look_meaningful() {
+        let anchor = |token: &str| Anchor {
+            lang: "Python".into(),
+            token: token.into(),
+            callee: false,
+            kind: "identifier".into(),
+        };
+        // A renamed API that's gone from the code: a good single-fix rule.
+        assert!(single_fix_concern(&anchor("PluginSQL"), 0, false).is_none());
+        assert!(single_fix_concern(&anchor("ClaudeCodeOptions"), 2, false).is_none());
+        // Throwaway names, everyday methods, code that's still everywhere, test data: held back.
+        for t in ["r3", "x", "df", "data", "result2", "tmp_", "append", "sort"] {
+            assert!(single_fix_concern(&anchor(t), 0, false).is_some(), "{t}");
+        }
+        assert!(single_fix_concern(&anchor("requests"), 12, false).is_some());
+        assert!(single_fix_concern(&anchor("PluginSQL"), 0, true).is_some());
+        assert!(is_test_path("tests/test_api.py") && is_test_path("src/a.spec.ts"));
+        assert!(!is_test_path("src/testing_utils.py") && !is_test_path("datasette/app.py"));
+    }
+
+    #[test]
     fn one_chat_is_one_fix_event() {
         let edit = |i: i64, session: &str| {
             let mut c = correction(
@@ -449,14 +629,20 @@ mod tests {
             c.time = i;
             c
         };
-        // Two edits in one chat: no agent hunks, so no precision evidence, and one event.
+        // Two edits in one chat are one fix event, not two independent fixes...
         let one_chat = [edit(1, "s1"), edit(2, "s1")];
         let (props, stats) = propose(&one_chat, &[], &ProposeOptions::default()).unwrap();
-        assert!(props.is_empty(), "one chat is not two independent fixes");
         assert!(stats.explain.iter().all(|e| e.support == 1));
-        // The same edits in two chats are two fix events.
+        // ...which is enough by default: one correction proposes a rule.
+        assert!(props.iter().any(|p| p.rule.id == "avoid-fetch-call"));
+        let two = ProposeOptions {
+            min_support: 2,
+            ..Default::default()
+        };
+        let (props, _) = propose(&one_chat, &[], &two).unwrap();
+        assert!(props.is_empty(), "one chat doesn't count as two fixes");
         let two_chats = [edit(1, "s1"), edit(2, "s2")];
-        let (props, _) = propose(&two_chats, &[], &ProposeOptions::default()).unwrap();
+        let (props, _) = propose(&two_chats, &[], &two).unwrap();
         assert!(props.iter().any(|p| p.rule.id == "avoid-fetch-call"));
     }
 
@@ -501,15 +687,15 @@ mod tests {
         };
         let (props, _) = propose(&cs, &[], &opts).unwrap();
         assert!(props.is_empty(), "only 2 corrections before the cutoff");
-        // By default one correction is enough, if the rule also hits other agent code.
+        // By default one correction is enough: people review it, and it starts in shadow.
         let opts = ProposeOptions {
             known_before: 1,
             ..Default::default()
         };
         let (props, _) = propose(&cs, &[], &opts).unwrap();
-        assert!(props.is_empty(), "one fix and no other evidence");
-        // The agent hunk c0 came from is not evidence for a rule learned from c0, however
-        // many of its lines the fix rewrote.
+        assert_eq!(props.len(), 1, "one fix proposes a rule");
+        // The agent hunk c0 came from doesn't count as evidence, however many of its lines
+        // the fix rewrote: the rule has no precision measurement rather than a perfect one.
         let corrected = |id: &str, lines: u32| ingrain_core::CorrectedLines {
             lines: ingrain_core::LineRange::new(1, lines),
             time: 0,
@@ -519,35 +705,14 @@ mod tests {
             crate::backtest::tests::hunk("x = fetch(a);\ny = fetch(b);\nz = fetch(c);\n", None, 0);
         own.corrected.push(corrected("c0", 3));
         let (props, _) = propose(&cs, std::slice::from_ref(&own), &opts).unwrap();
-        assert!(props.is_empty(), "a single fix does not certify itself");
-
-        // Independent evidence: other agent code the rule flags that humans corrected
-        // (here they fixed the fetch arguments, a different cluster). Three such hunks
-        // clear the 50% precision bound, so the single fetch → api.get fix is proposed.
-        let mut with_evidence = cs[..1].to_vec();
-        let mut agent = vec![own];
-        for i in 1..=3 {
-            let mut c = correction(
-                &format!("d{i}"),
-                "TypeScript",
-                &format!("y = fetch(alpha{i});"),
-                &format!("y = fetch(beta{i});"),
-                &format!("g{i}"),
-            );
-            c.time = 0;
-            with_evidence.push(c);
-            let mut h = crate::backtest::tests::hunk(&format!("y = fetch(alpha{i});\n"), None, 0);
-            h.corrected.push(corrected(&format!("d{i}"), 1));
-            agent.push(h);
-        }
-        let (props, _) = propose(&with_evidence, &agent, &opts).unwrap();
-        let ids: Vec<&str> = props.iter().map(|p| p.rule.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            ["avoid-fetch-call"],
-            "a single fix with independent agent-code hits proposes a rule; \
-             the one-fix `alpha` clusters have no outside evidence"
-        );
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].score.true_hits, 0, "a fix doesn't certify itself");
+        // Counter-evidence rejects it: the rule fires on agent code humans kept.
+        let kept: Vec<ingrain_core::AgentHunk> = (0..3)
+            .map(|i| crate::backtest::tests::hunk(&format!("k{i} = fetch(q{i});\n"), None, 0))
+            .collect();
+        let (props, _) = propose(&cs, &kept, &opts).unwrap();
+        assert!(props.is_empty(), "flags kept agent code: no precision");
 
         let opts = ProposeOptions {
             taken_ids: ["avoid-fetch-call".to_string()].into(),
