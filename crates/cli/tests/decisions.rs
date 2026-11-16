@@ -234,6 +234,31 @@ fn records_inject_block_and_supersede() {
         ],
     );
     let pid = out.split_whitespace().nth(1).unwrap().to_owned();
+    let pending =
+        std::fs::read_to_string(dir.join(format!("decisions/pending/{pid}.yml"))).unwrap();
+    assert!(
+        pending.contains("rejected:\n- Keep the cache on SQLite."),
+        "{pending}"
+    );
+    // Changing only the scope keeps the wording, so the decision doesn't reject itself.
+    let out = ok(
+        dir,
+        &[
+            "supersede",
+            "D-0001",
+            "--decision",
+            "Billing code calls the payments client, never raw fetch.",
+            "--reason",
+            "billing moved",
+            "--scope",
+            "src/payments/**",
+        ],
+    );
+    let scope_only = out.split_whitespace().nth(1).unwrap().to_owned();
+    let pending =
+        std::fs::read_to_string(dir.join(format!("decisions/pending/{scope_only}.yml"))).unwrap();
+    assert!(!pending.contains("rejected:"), "{pending}");
+    ok(dir, &["reject", &scope_only, "--reason", "test only"]);
     assert!(ok(dir, &["list"]).contains("D-0002"));
     ok(dir, &["accept", &pid]);
     let list = ok(dir, &["list", "--all"]);

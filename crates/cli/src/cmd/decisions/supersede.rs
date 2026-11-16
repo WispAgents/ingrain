@@ -35,13 +35,22 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     if args.reason.trim().is_empty() {
         bail!("a reason is required: why should {} change?", old.id);
     }
+    let decision = args.decision.trim().to_owned();
+    // Alternatives already rejected stay rejected; the old wording joins them only when it
+    // changed (a scope-only change must not reject its own decision).
+    let mut rejected = old.rejected.clone();
+    if !rejected.iter().any(|r| r.trim() == old.decision.trim()) {
+        rejected.push(old.decision.clone());
+    }
+    // Reviving a rejected alternative (or keeping the wording) un-rejects it.
+    rejected.retain(|r| r.trim() != decision);
     let record = Record {
         id: repo
             .ledger
             .fresh_pending_id(&format!("{}\0{}", old.id, args.decision))?,
-        decision: args.decision.trim().to_owned(),
+        decision,
         reason: args.reason.trim().to_owned(),
-        rejected: vec![old.decision.clone()],
+        rejected,
         scope: if args.scope.is_empty() {
             old.scope.clone()
         } else {
