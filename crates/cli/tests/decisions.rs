@@ -572,8 +572,10 @@ fn plugin_hooks_answer_only_in_set_up_repos_without_their_own() {
     std::fs::create_dir_all(dir.join("decisions")).unwrap();
     assert_eq!(plugin("pre-tool-use", edit("decisions/0001-db.yml")), None);
 
-    // Set up, no repo hooks: the plugin answers.
+    // Set up and committed, no repo hooks: the plugin answers.
     ok(dir, &["init", "--no-claude", "--no-git-hook"]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "ingrain"]);
     let denied = plugin("pre-tool-use", edit("decisions/D-0001.yml")).expect("plugin answers");
     assert_eq!(denied["hookSpecificOutput"]["permissionDecision"], "deny");
 
@@ -746,4 +748,223 @@ fn enforcement_gaps_shell_config_overrides_and_ci() {
         text.contains("::warning file=src/y.ts,line=2,title=decision D-0001 overridden::"),
         "{text}"
     );
+}
+
+/// An agent setting ingrain up accepts and commits on its own, with no one to approve (`-p`,
+/// headless). Once that commit lands, the ledger is protected again.
+#[test]
+fn first_setup_lets_the_agent_accept_and_commit() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    let out = ok(
+        dir,
+        &[
+            "add",
+            "--propose",
+            "No axios in src.",
+            "--forbid-import",
+            "axios",
+        ],
+    );
+    let pid = out
+        .split(|c: char| c.is_whitespace() || c == '`' || c == ':')
+        .find(|w| w.starts_with("P-"))
+        .unwrap_or_else(|| panic!("no proposal id in {out}"))
+        .to_owned();
+    let bash = |id: &str, command: &str| {
+        json!({"session_id": "s", "cwd": dir, "tool_name": "Bash", "tool_use_id": id,
+            "tool_input": {"command": command}})
+    };
+
+    // Nothing reviewed is committed yet: accept, editing, and committing go through.
+    let accept = bash("a1", &format!("ingrain decisions accept {pid}"));
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", accept.clone())), "");
+    ok(dir, &["accept", &pid]);
+    assert!(hook(dir, "post-tool-use", accept).is_none());
+    let edit = json!({"session_id": "s", "cwd": dir, "tool_name": "Edit",
+        "tool_input": {"file_path": dir.join("decisions/D-0001.yml"),
+            "old_string": "No axios", "new_string": "No axios"}});
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", edit.clone())), "");
+    // Skipping the pre-commit check is still asked.
+    let skip = bash("a2", "git commit -m x --no-verify");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", skip)), "ask");
+    let commit = bash(
+        "a3",
+        "git add decisions .corrections .claude/settings.json && git commit -qm 'set up ingrain'",
+    );
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", commit.clone())), "");
+    git(
+        dir,
+        &["add", "decisions", ".corrections", ".claude/settings.json"],
+    );
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    assert!(hook(dir, "post-tool-use", commit).is_none());
+
+    // Committed: protected again.
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", edit)), "deny");
+    let accept = bash("b1", "ingrain decisions accept P-1");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", accept)), "ask");
+    // An orphan branch has no reviewed files in HEAD but doesn't reopen setup.
+    git(dir, &["checkout", "-q", "--orphan", "fresh"]);
+    let accept = bash("b2", "ingrain decisions accept P-1");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", accept)), "ask");
+    git(dir, &["checkout", "-q", "main"]);
+
+    // A person-approved accept, then a plain commit: the commit only records the approved file.
+    let out = ok(
+        dir,
+        &[
+            "add",
+            "--propose",
+            "No lodash in src.",
+            "--forbid-import",
+            "lodash",
+        ],
+    );
+    let pid = out
+        .split(|c: char| c.is_whitespace() || c == '`' || c == ':')
+        .find(|w| w.starts_with("P-"))
+        .unwrap()
+        .to_owned();
+    let accept = bash("c1", &format!("ingrain decisions accept {pid}"));
+    assert_eq!(
+        decision_of(hook(dir, "pre-tool-use", accept.clone())),
+        "ask"
+    );
+    ok(dir, &["accept", &pid]);
+    assert!(hook(dir, "post-tool-use", accept).is_none());
+    let commit = bash("c2", "git commit -qm 'record decision'");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", commit.clone())), "");
+    git(dir, &["commit", "-qm", "record decision"]);
+    assert!(hook(dir, "post-tool-use", commit).is_none());
+}
+
+/// Ways back into first setup once a ledger was committed somewhere (from review).
+#[test]
+fn first_setup_does_not_reopen() {
+    let tmp = repo();
+    let dir = tmp.path();
+    let before = String::from_utf8(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(dir)
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    // Set up on a branch that isn't merged yet: main doesn't have the ledger.
+    git(dir, &["checkout", "-q", "-b", "ingrain-setup"]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    let accept = |cwd: &Path| {
+        json!({"session_id": "r", "cwd": cwd, "tool_name": "Bash", "tool_use_id": "x",
+            "tool_input": {"command": "ingrain decisions accept P-1"}})
+    };
+    git(dir, &["checkout", "-q", "main"]);
+    assert_eq!(
+        decision_of(hook(dir, "pre-tool-use", accept(dir))),
+        "ask",
+        "other branch"
+    );
+
+    // HEAD moved back to before ingrain, in a fresh clone of the refs (no marker yet).
+    let clone = tempfile::tempdir().unwrap();
+    git(clone.path(), &["clone", "-q", dir.to_str().unwrap(), "c"]);
+    let c = &clone.path().join("c");
+    git(c, &["reset", "-q", "--hard", &before]);
+    assert_eq!(
+        decision_of(hook(c, "pre-tool-use", accept(c))),
+        "ask",
+        "reset"
+    );
+
+    // A worktree on an older commit shares the refs.
+    git(dir, &["worktree", "add", "-q", ".wt", &before]);
+    let wt = dir.join(".wt");
+    assert_eq!(
+        decision_of(hook(&wt, "pre-tool-use", accept(&wt))),
+        "ask",
+        "worktree"
+    );
+
+    // A repository nested in one with a ledger.
+    let nested = dir.join("scratch");
+    std::fs::create_dir_all(&nested).unwrap();
+    git(&nested, &["init", "-q"]);
+    assert_eq!(
+        decision_of(hook(&nested, "pre-tool-use", accept(&nested))),
+        "ask",
+        "nested"
+    );
+}
+
+/// An approved accept then a commit is fine; an edit hidden from the size and mtime stamp,
+/// then committed, is not.
+#[test]
+fn hidden_edit_of_an_accepted_file_is_caught_at_commit() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    let bash = |id: &str, command: &str| {
+        json!({"session_id": "h", "cwd": dir, "tool_name": "Bash", "tool_use_id": id,
+            "tool_input": {"command": command}})
+    };
+    let out = ok(
+        dir,
+        &[
+            "add",
+            "--propose",
+            "No lodash in src.",
+            "--forbid-import",
+            "lodash",
+        ],
+    );
+    let pid = out
+        .split(|c: char| c.is_whitespace() || c == '`' || c == ':')
+        .find(|w| w.starts_with("P-"))
+        .unwrap()
+        .to_owned();
+    let accept = bash("h1", &format!("ingrain decisions accept {pid}"));
+    assert_eq!(
+        decision_of(hook(dir, "pre-tool-use", accept.clone())),
+        "ask"
+    );
+    ok(dir, &["accept", &pid]);
+    assert!(hook(dir, "post-tool-use", accept).is_none());
+
+    // Same size, same mtime, different content.
+    let path = dir.join("decisions/D-0002.yml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let sneaky = bash("h2", "f=decisions/D-0002.yml; sed -i s/lodash/LODASH/ $f");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", sneaky.clone())), "");
+    std::fs::write(&path, text.replace("lodash", "LODASH")).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(mtime)
+        .unwrap();
+    let after = hook(dir, "post-tool-use", sneaky).expect("blocked");
+    assert_eq!(after["decision"], "block");
+    let commit = bash("h3", "git commit -qam x");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", commit.clone())), "");
+    git(dir, &["commit", "-qam", "x"]);
+    let after = hook(dir, "post-tool-use", commit).expect("commit flagged");
+    assert_eq!(after["decision"], "block");
 }

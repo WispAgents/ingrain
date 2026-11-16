@@ -65,8 +65,11 @@ vague. Then:
 - **Accept only what the user approves:** `ingrain decisions accept <P-ids…>`.
 - **Reject the rest with a reason:** `ingrain decisions reject <P-id> --reason "<why>"`, so it isn't proposed again.
 
-Accepted records can't be edited by agents afterwards (the hook refuses); changes go through
-`ingrain decisions supersede`.
+Until the first commit that contains decisions, rules or ingrain config, ingrain's hooks let you
+accept, reject, edit proposals and commit: nothing reviewed exists yet, and people review the setup
+commit like any other. After that commit, accepted records can't be edited by agents (the hook
+refuses), `accept` and `reject` need the person's approval, and changes go through
+`ingrain decisions supersede`. So finish steps 3 to 5 in one go.
 
 ## 4. Add the CI check (GitHub)
 
@@ -87,7 +90,8 @@ jobs:
 ## 5. Commit on a branch
 
 Create a branch and commit, by file name: `decisions/`, `.corrections/`, `.claude/settings.json`,
-`AGENTS.md` and the workflow. Don't push or open a PR unless the user asks.
+`AGENTS.md` and the workflow. Don't use `--no-verify`: the pre-commit hook must run. Don't push or
+open a PR unless the user asks.
 
 ## 6. Show it working
 

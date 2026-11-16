@@ -80,7 +80,11 @@ pub fn needs_approval(command: &str) -> Option<String> {
     for seg in &segments {
         // A segment can be only a redirect (`> decisions/D-0001.yml`).
         let program = seg.words.first().map_or("", |w| base_name(w));
-        let skip = commit_message_values(&seg.words);
+        let mut skip = commit_message_values(&seg.words);
+        // `ingrain decisions …` names the subcommand, not the `decisions/` folder.
+        if program == "ingrain" {
+            skip.push(1 + global_options(&seg.words[1..]));
+        }
         let named = seg
             .words
             .iter()
@@ -141,6 +145,11 @@ fn has_substitution(command: &str) -> bool {
         }
     }
     false
+}
+
+/// Why `command` skips ingrain's pre-commit check, if it does. Asked even during first setup.
+pub fn skips_verification(command: &str) -> Option<String> {
+    lex(command).iter().find_map(skips_hooks)
 }
 
 /// A word that names `decisions/` or `.corrections/` outside their proposal folders.
@@ -294,10 +303,23 @@ fn commit_message_values(words: &[String]) -> Vec<usize> {
     out
 }
 
+/// How many words of ingrain's global options (`--repo DIR`) come before the subcommand.
+fn global_options<S: AsRef<str>>(args: &[S]) -> usize {
+    let mut i = 0;
+    while let Some(w) = args.get(i).map(AsRef::as_ref) {
+        match w {
+            "--repo" => i += 2,
+            w if w.starts_with("--repo=") => i += 1,
+            _ => break,
+        }
+    }
+    i.min(args.len())
+}
+
 /// `ingrain` subcommands that accept, reject or retune what people review.
 fn ledger_command(words: &[&str]) -> Option<String> {
     let at = words.iter().position(|w| base_name(w) == "ingrain")?;
-    let rest = &words[at + 1..];
+    let rest = &words[at + 1 + global_options(&words[at + 1..])..];
     let (group, sub) = (rest.first().copied()?, rest.get(1).copied().unwrap_or(""));
     let mutating = match group {
         "decisions" => match sub {
@@ -530,9 +552,28 @@ pub fn snapshot(git: &Git) -> BTreeMap<String, String> {
                 files.insert(old.to_owned(), "deleted".to_owned());
             }
         }
-        files.insert(path.to_owned(), stamp(&git.root().join(path)));
+        files.insert(path.to_owned(), stamp_of(git, path));
     }
     files
+}
+
+/// The stamp `snapshot` records for a repo-relative path. Reviewed files also get a hash of
+/// their content, so an edit that keeps size and modification time (`touch -r`) still shows.
+pub fn stamp_of(git: &Git, rel: &str) -> String {
+    let path = git.root().join(rel);
+    let stamp = stamp(&path);
+    match std::fs::read(&path) {
+        Ok(bytes) if is_reviewed_file(rel) => format!("{stamp}:{:016x}", content_hash(&bytes)),
+        _ => stamp,
+    }
+}
+
+/// A content hash that is stable across runs (`DefaultHasher` uses fixed keys).
+pub fn content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
 }
 
 fn stamp(path: &Path) -> String {
@@ -645,6 +686,9 @@ mod tests {
             "cat decisions/D-0001.yml # it's\necho \"$(rm decisions/D-0001.yml)\"",
             "echo \"${x-\"'\"}\" \"$(rm decisions/D-0001.yml)\" #'",
             "x='$(rm decisions/D-0001.yml)'; cat decisions/D-0001.yml ${x@P}",
+            "ingrain decisions list; rm -rf decisions",
+            "ingrain --repo . decisions accept P-1",
+            "ingrain --repo=. rules mode x block",
         ] {
             assert!(needs_approval(cmd).is_some(), "{cmd}");
         }
@@ -687,6 +731,11 @@ mod tests {
             "git commit -uno -m x",
             "cat > /tmp/notes <<'EOF'\nsee decisions/D-0001.yml and rm it\nEOF",
             "cat decisions/D-0001.yml 2>/dev/null",
+            // Read-only ingrain subcommands next to other commands.
+            "ingrain decisions for src/a.ts; git branch --show-current",
+            "ingrain decisions list --all && npm test",
+            "ingrain rules list; git stash list",
+            "ingrain --repo . decisions for src/a.ts; git branch",
         ] {
             assert!(needs_approval(cmd).is_none(), "{cmd}");
         }

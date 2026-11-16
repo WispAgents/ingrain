@@ -66,8 +66,10 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     }
     println!(
         "
-next: `ingrain decisions add \"...\"` to record a decision, `ingrain decisions extract --doc AGENTS.md`
-      to propose some, or `ingrain rules mine` then `ingrain rules propose` to learn rules from your corrections"
+next: `ingrain decisions extract --doc AGENTS.md` to propose decisions from your rule docs (or
+      `ingrain decisions add \"...\"` to record one), then `ingrain decisions review`. Commit
+      decisions/, .corrections/ and .claude/settings.json. Later, `ingrain rules mine` then
+      `ingrain rules propose` learn rules from your corrections. Agents: see `ingrain --help`."
     );
     Ok(ExitCode::SUCCESS)
 }

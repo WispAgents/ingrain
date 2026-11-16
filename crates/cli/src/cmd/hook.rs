@@ -94,18 +94,28 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
 
     // Accepted decisions, rules and config are reviewed by people; agents propose instead.
     // Checked before anything else is loaded, so a broken config or ledger can't switch it off.
+    // Exception: during first setup nothing reviewed is committed yet, so there is nothing to
+    // protect. The agent setting ingrain up may accept proposals and commit them; people review
+    // that commit like any other (and CI flags ledger changes).
     let mut bash_ask = None;
+    let mut first_setup = false;
     if let Event::PreToolUse = event {
         let git = ingrain_core::Git::open(dir)?;
         if let Some(rel) = edited_path(&git, payload)
             && bash::is_reviewed_file(&rel)
+            && !is_first_setup(&git)
         {
             return Ok(Some(deny(reviewed_message(&rel))));
         }
         if tool == "Bash" {
-            bash_ask = payload["tool_input"]["command"]
-                .as_str()
-                .and_then(bash::needs_approval);
+            let command = payload["tool_input"]["command"].as_str().unwrap_or("");
+            bash_ask = bash::needs_approval(command);
+            // Reading history can take a second in a big repo, and is only needed while setting
+            // up: for a command that would be asked, or one that may commit what setup wrote.
+            if (bash_ask.is_some() || command.contains("commit")) && is_first_setup(&git) {
+                first_setup = true;
+                bash_ask = bash::skips_verification(command);
+            }
         }
     }
 
@@ -125,7 +135,7 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
                 let snap = BashSnapshot {
                     time: crate::session::now(),
                     files: bash::snapshot(&repo.git),
-                    asked: bash_ask.is_some(),
+                    asked: bash_ask.is_some() || first_setup,
                     head: bash::head(&repo.git),
                 };
                 session.bash.insert(id.clone(), snap);
@@ -146,6 +156,68 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
         eprintln!("ingrain: couldn't save hook state: {e:#}");
     }
     Ok(answer)
+}
+
+/// No decision, rule or ingrain config was ever committed: ingrain is being set up. The
+/// repository's history (every ref, so other branches and worktrees count) is read, not just
+/// `HEAD`, so resetting or checking out an older commit doesn't reopen setup; nor does a
+/// nested repository (`git init` in a subfolder, a submodule) inside one that has a ledger.
+fn is_first_setup(git: &ingrain_core::Git) -> bool {
+    if ledger_committed(git) {
+        return false;
+    }
+    let mut outer: Vec<std::path::PathBuf> =
+        git.root().parent().into_iter().map(Into::into).collect();
+    if let Some(project) = std::env::var_os("CLAUDE_PROJECT_DIR") {
+        outer.push(project.into());
+    }
+    while let Some(dir) = outer.pop() {
+        let Ok(enclosing) = ingrain_core::Git::open(&dir) else {
+            continue;
+        };
+        if enclosing.root() == git.root() {
+            continue;
+        }
+        if ledger_committed(&enclosing) {
+            return false;
+        }
+        outer.extend(enclosing.root().parent().map(Into::into));
+    }
+    true
+}
+
+/// Pathspecs of the files `bash::is_reviewed_file` protects.
+const REVIEWED_PATHSPECS: &[&str] = &[
+    ":(glob)decisions/*.yml",
+    ":(glob)decisions/*.yaml",
+    ":(glob).corrections/rules/*.yml",
+    ":(glob).corrections/rules/*.yaml",
+    ".corrections/config.yml",
+    ".corrections/rejected.yml",
+];
+
+/// Some commit on some ref has a reviewed file. Once true it stays true: remembered in the
+/// shared git dir (deleting the marker only costs a recount). If git can't tell, protect.
+fn ledger_committed(git: &ingrain_core::Git) -> bool {
+    let marker = git
+        .try_run(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .map(|d| {
+            std::path::PathBuf::from(d.trim())
+                .join("ingrain")
+                .join("ledger-committed")
+        });
+    if marker.as_ref().is_some_and(|m| m.is_file()) {
+        return true;
+    }
+    // Commits that touched a reviewed file, from every ref and HEAD; an empty repo has none.
+    let mut log = vec!["rev-list", "--all", "-1", "--"];
+    log.extend(REVIEWED_PATHSPECS);
+    let found = git.try_run(&log).is_none_or(|out| !out.trim().is_empty());
+    if found && let Some(m) = marker {
+        let _ = std::fs::create_dir_all(m.parent().expect("has a parent"));
+        let _ = std::fs::write(m, "");
+    }
+    found
 }
 
 fn context(event: &str, text: String) -> Value {
@@ -290,9 +362,23 @@ fn post_tool_use(
         }
         // The pre-check reads shell syntax and can be fooled (variables, globs); this sees
         // what actually changed. Commands the person approved may change reviewed files.
-        let reviewed: Vec<&String> = changed
+        let reviewed_changed: Vec<&String> = changed
             .iter()
             .filter(|p| bash::is_reviewed_file(p))
+            .collect();
+        if before.asked {
+            // What the person approved; committing it later as it is isn't tampering.
+            for p in &reviewed_changed {
+                session
+                    .vouched
+                    .insert((*p).clone(), bash::stamp_of(&repo.git, p));
+            }
+        }
+        // A file left exactly as an approved command wrote it was only recorded (committed,
+        // staged) by this one.
+        let reviewed: Vec<&String> = reviewed_changed
+            .into_iter()
+            .filter(|p| session.vouched.get(*p) != Some(&bash::stamp_of(&repo.git, p)))
             .collect();
         if !before.asked && !reviewed.is_empty() {
             // The person may have edited it meanwhile, so don't tell the agent to restore it.

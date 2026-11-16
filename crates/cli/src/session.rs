@@ -19,6 +19,10 @@ pub struct Session {
     /// compares to find the files the command changed.
     #[serde(default)]
     pub bash: BTreeMap<String, BashSnapshot>,
+    /// Reviewed files as an approved (or first-setup) command left them, by path: committing
+    /// them later as they are isn't tampering.
+    #[serde(default)]
+    pub vouched: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -39,6 +43,9 @@ impl Session {
     /// hook used up, which must not come back from disk.
     pub fn merge(&mut self, on_disk: Session, consumed: Option<&str>) {
         self.edited.extend(on_disk.edited);
+        for (path, stamp) in on_disk.vouched {
+            self.vouched.entry(path).or_insert(stamp);
+        }
         for (id, snap) in on_disk.bash {
             if Some(id.as_str()) != consumed {
                 self.bash.entry(id).or_insert(snap);

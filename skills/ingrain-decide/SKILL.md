@@ -37,7 +37,9 @@ Other checks: `--forbid-import node-fetch`, `--forbid-dep redis`. `--category` t
 
 Then show the user the proposal and ask them to accept it. If they say yes, run
 `ingrain decisions accept <P-id>` (it stages the file; commit it with their other changes).
-Don't accept without the user's explicit OK.
+Don't accept without the user's explicit OK. Once the repo's decisions are committed, Claude Code
+asks the person to approve `accept` itself; in a session with no one to approve (headless, `-p`),
+the hook refuses it: give the user the exact `ingrain decisions accept <P-id>` command to run.
 
 ## Change or drop a decision
 
