@@ -1044,3 +1044,81 @@ fn first_setup_stays_in_its_repo() {
     git(&fresh, &["ci", "-qm", "setup"]);
     assert!(hook(&fresh, "post-tool-use", ci).is_none());
 }
+
+/// A commit must hold the reviewed file as it was on disk: content staged around it (`git
+/// apply --cached`) is reported. And first setup doesn't reach a nested repo's ledger.
+#[test]
+fn staged_tampering_and_nested_ledgers() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    let bash = |cwd: &Path, id: &str, command: &str| {
+        json!({"session_id": "n", "cwd": cwd, "tool_name": "Bash", "tool_use_id": id,
+            "tool_input": {"command": command}})
+    };
+    let record = std::fs::read_to_string(dir.join("decisions/D-0001.yml")).unwrap();
+    let staged = record.replace("axios", "axios-allowed");
+    let blob = {
+        let mut child = Command::new("git")
+            .args(["hash-object", "-w", "--stdin"])
+            .current_dir(dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(staged.as_bytes())
+            .unwrap();
+        String::from_utf8(child.wait_with_output().unwrap().stdout)
+            .unwrap()
+            .trim()
+            .to_owned()
+    };
+    // The person's own edit, still uncommitted: on disk as committed, but listed by git status.
+    std::fs::write(dir.join("decisions/D-0001.yml"), format!("{record}\n")).unwrap();
+    let sneaky = bash(dir, "n1", "sh /tmp/stage-it.sh && git commit -qm wip");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", sneaky.clone())), "");
+    git(
+        dir,
+        &[
+            "update-index",
+            "--cacheinfo",
+            &format!("100644,{blob},decisions/D-0001.yml"),
+        ],
+    );
+    git(dir, &["commit", "-qm", "wip", "--no-verify"]);
+    let after = hook(dir, "post-tool-use", sneaky).expect("reported");
+    assert_eq!(after["decision"], "block");
+    git(dir, &["reset", "-q", "--hard", "HEAD~1"]);
+
+    // A fresh repo with a nested clone that has a ledger.
+    let outer = tempfile::tempdir().unwrap();
+    let o = outer.path().join("o");
+    std::fs::create_dir_all(o.join("vendor")).unwrap();
+    git(&o, &["init", "-q"]);
+    git(
+        &o.join("vendor"),
+        &["clone", "-q", dir.to_str().unwrap(), "lib"],
+    );
+    for command in [
+        "cd vendor/lib && ingrain decisions accept P-1",
+        "ingrain --repo vendor/lib decisions accept P-1",
+        "sed -i s/axios/x/ vendor/lib/decisions/D-0001.yml",
+    ] {
+        let payload = bash(&o, "n2", command);
+        assert_eq!(
+            decision_of(hook(&o, "pre-tool-use", payload)),
+            "ask",
+            "{command}"
+        );
+    }
+}

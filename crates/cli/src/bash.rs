@@ -69,6 +69,9 @@ pub fn needs_approval(command: &str) -> Option<String> {
         if let Some(why) = skips_hooks(seg) {
             return Some(why);
         }
+        if let Some(why) = hides_ledger_history(seg) {
+            return Some(why);
+        }
     }
     // A command substitution inside quotes isn't split out; don't trust it near reviewed paths.
     let lower = command.to_lowercase();
@@ -147,83 +150,92 @@ fn has_substitution(command: &str) -> bool {
     false
 }
 
-/// `command` may act on files outside the repository at `root`: a path (absolute, `~`, with
-/// `..`, or ingrain's `--repo`) that resolves outside it, or a variable or backtick expansion,
-/// which could point anywhere. Commit messages are data. `cwd` is where the command starts.
-pub fn leaves_repo(command: &str, cwd: &Path, root: &Path) -> bool {
-    let root = comparable(root);
-    lex(command).iter().any(|seg| {
-        let skip = commit_message_values(&seg.words);
-        let words = seg
-            .words
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !skip.contains(i))
-            .map(|(_, w)| w);
-        words.chain(&seg.redirects).chain(&seg.env).any(|w| {
-            if w.contains('`') || expands_variable(w) {
-                return true;
-            }
-            let value = w.split_once('=').map_or(w.as_str(), |(_, v)| v);
-            let pathish = value.starts_with(['/', '~', '\\'])
-                || value.contains("..")
-                || value.get(1..3).is_some_and(|d| d == ":/" || d == ":\\");
-            pathish && !comparable(&resolve(value, cwd)).starts_with(&root)
+/// `git` subcommands a setup commit needs.
+const GIT_SETUP: &[&str] = &[
+    "add",
+    "commit",
+    "status",
+    "log",
+    "diff",
+    "show",
+    "branch",
+    "checkout",
+    "switch",
+    "rev-parse",
+    "ls-files",
+];
+
+/// `command` is one an agent setting ingrain up may run without asking, during first setup:
+/// only `ingrain` (on this repository: no `--repo`), the `git` subcommands a setup commit needs
+/// (no global options such as `-C`), read-only programs and `export`, with no `cd`, no variable
+/// or substitution outside commit messages, and output only to `/dev/null` or a relative path
+/// inside the repository. Anything else is asked as usual, so the exception can't reach
+/// another repository's ledger (a sibling, a nested clone, a symlink).
+pub fn setup_command(command: &str) -> bool {
+    let plain = |w: &str| !w.contains('$') && !w.contains('`');
+    let segments = lex(command);
+    !segments.is_empty()
+        && segments.iter().all(|seg| {
+            let skip = commit_message_values(&seg.words);
+            let args: Vec<&String> = seg
+                .words
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !skip.contains(i))
+                .map(|(_, w)| w)
+                .collect();
+            let redirects_ok = seg.redirects.iter().all(|t| {
+                t == "/dev/null"
+                    || (plain(t)
+                        && !t.contains("..")
+                        && !t.contains(':')
+                        && !t.starts_with(['/', '~', '\\']))
+            });
+            let program = seg.words.first().map_or("", |w| base_name(w));
+            let allowed = match program {
+                "" => true,
+                "ingrain" => !args.iter().any(|w| w.starts_with("--repo")),
+                "git" => matches!(
+                    seg.words.get(1).map(String::as_str),
+                    Some(sub) if GIT_SETUP.contains(&sub)
+                ),
+                "export" => args.iter().skip(1).all(|w| w.contains('=')),
+                "cd" | "pushd" | "popd" => false,
+                p => READ_ONLY.contains(&p) && !writes_with(p, &seg.words),
+            };
+            let words_ok = program == "export" || args.iter().skip(1).all(|w| plain(w));
+            allowed && words_ok && redirects_ok
         })
-    })
 }
 
-/// `$name`, `${…}` or `$1`: a shell variable; `$(` is a substitution whose commands are lexed.
-fn expands_variable(word: &str) -> bool {
-    word.match_indices('$').any(|(i, _)| {
-        word[i + 1..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '{' | '@' | '*'))
-    })
-}
-
-/// `word` as an absolute path: `~` is the home directory, relative paths start at `cwd`, and
-/// `.` / `..` are folded without touching the disk.
-fn resolve(word: &str, cwd: &Path) -> std::path::PathBuf {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    let joined = match (word.strip_prefix('~'), home) {
-        (Some(rest), Some(home)) => Path::new(&home).join(rest.trim_start_matches(['/', '\\'])),
-        _ => cwd.join(word),
-    };
-    let mut out = std::path::PathBuf::new();
-    for part in joined.components() {
-        match part {
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-/// A path as a comparable string: symlinks in its existing part resolved (`/tmp` is
-/// `/private/tmp` on macOS), `\\?\` dropped, `/` separators, a trailing `/`.
-fn comparable(path: &Path) -> String {
-    let mut existing = path;
-    let mut rest = Vec::new();
-    let base = loop {
-        if let Ok(real) = std::fs::canonicalize(existing) {
-            break real;
-        }
-        match (existing.parent(), existing.file_name()) {
-            (Some(parent), Some(name)) => {
-                rest.push(name.to_owned());
-                existing = parent;
-            }
-            _ => break existing.to_path_buf(),
+/// Commands that could hide that a ledger was ever committed, which would reopen first setup:
+/// removing ingrain's marker in `.git/ingrain/`, expiring or deleting reflogs, deleting refs
+/// with `update-ref -d`.
+fn hides_ledger_history(seg: &Segment) -> Option<String> {
+    let program = seg.words.first().map_or("", |w| base_name(w));
+    let marker = seg
+        .words
+        .iter()
+        .chain(&seg.redirects)
+        .any(|w| w.replace('\\', "/").contains(".git/ingrain"))
+        && !(READ_ONLY.contains(&program) && !writes_with(program, &seg.words))
+        && program != "git";
+    let git = program == "git" && {
+        let (sub, rest) = git_subcommand(&seg.words);
+        match sub {
+            Some("reflog") => rest
+                .first()
+                .is_some_and(|w| matches!(w.as_str(), "expire" | "delete")),
+            Some("update-ref") => rest.iter().any(|w| w == "-d" || w == "--stdin"),
+            Some("gc") => rest.iter().any(|w| w.starts_with("--prune")),
+            _ => false,
         }
     };
-    let full = rest.iter().rev().fold(base, |p, name| p.join(name));
-    let text = ingrain_core::git::normalize_path(&full.to_string_lossy()).replace('\\', "/");
-    format!("{}/", text.trim_end_matches('/'))
+    (marker || git).then(|| {
+        "This could hide that the decisions were committed (ingrain's marker in .git/ingrain, \
+         reflogs, refs), which would let agents accept decisions without asking."
+            .to_owned()
+    })
 }
 
 /// Why `command` skips ingrain's pre-commit check, if it does. Asked even during first setup.
@@ -409,6 +421,9 @@ fn ledger_command(words: &[&str]) -> Option<String> {
         }
     }
     let (group, sub) = (rest.first().copied()?, rest.get(1).copied().unwrap_or(""));
+    if rest.iter().any(|w| matches!(*w, "--help" | "-h")) {
+        return None;
+    }
     let mutating = match group {
         "decisions" => match sub {
             "accept" | "reject" | "review" => true,
@@ -659,11 +674,32 @@ pub fn stamp_of(git: &Git, rel: &str) -> String {
     }
 }
 
-/// A content hash that is stable across runs (`DefaultHasher` uses fixed keys).
+/// `stamp` (from `stamp_of`) was taken of a file with this content.
+pub fn stamp_holds(stamp: &str, content: &[u8]) -> bool {
+    stamp
+        .rsplit_once(':')
+        .is_some_and(|(_, hash)| hash == format!("{:016x}", content_hash(content)))
+}
+
+/// Files in the index.
+pub fn tracked(git: &Git) -> Vec<String> {
+    git.try_run(&["ls-files", "-z"])
+        .map(|out| {
+            out.split('\0')
+                .filter(|p| !p.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A content hash that is stable across runs (`DefaultHasher` uses fixed keys). Line endings
+/// are folded, so a checkout with `core.autocrlf` matches its commit.
 pub fn content_hash(bytes: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
+    let text = String::from_utf8_lossy(bytes).replace("\r\n", "\n");
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
+    text.hash(&mut h);
     h.finish()
 }
 
@@ -782,6 +818,9 @@ mod tests {
             "ingrain --repo=. rules mode x block",
             "ingrain decisions --repo ../other accept P-1",
             "ingrain rules mode --repo=. x block",
+            "rm -rf .git/ingrain",
+            "git reflog expire --expire=now --all",
+            "git update-ref -d refs/remotes/origin/main",
         ] {
             assert!(needs_approval(cmd).is_some(), "{cmd}");
         }
@@ -829,41 +868,48 @@ mod tests {
             "ingrain decisions list --all && npm test",
             "ingrain rules list; git stash list",
             "ingrain --repo . decisions for src/a.ts; git branch",
+            "ingrain decisions accept --help; ingrain rules mode -h",
+            "ls .git/ingrain/sessions",
+            "git reflog -5",
         ] {
             assert!(needs_approval(cmd).is_none(), "{cmd}");
         }
     }
 
     #[test]
-    fn commands_that_leave_the_repo() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join("repo");
-        std::fs::create_dir_all(root.join("sub")).unwrap();
-        let r = root.display().to_string();
+    fn setup_commands() {
         for cmd in [
-            "sed -i s/a/b/ ../../other/decisions/D-0001.yml".to_owned(),
-            "ingrain --repo ../../other decisions accept P-1".to_owned(),
-            "ingrain decisions accept P-1 --repo=/x".to_owned(),
-            "cd /tmp/x && ingrain decisions accept P-1".to_owned(),
-            "rm ~/r/decisions/D-0001.yml".to_owned(),
-            "f=decisions; rm $f/D-0001.yml".to_owned(),
-            "rm ${HOME}/decisions/D-0001.yml".to_owned(),
-            "cat `pwd`/decisions/D-0001.yml".to_owned(),
-            format!("cd {r}/sub/../.. && rm x"),
+            "ingrain decisions accept P-1 P-2",
+            "/Users/me/.cargo/bin/ingrain decisions accept P-1 2>/dev/null",
+            "ingrain decisions accept P-1 > /dev/null 2>&1",
+            "export PATH=/tmp/bin:$PATH && ingrain decisions accept P-1",
+            "ingrain decisions list --all; ingrain decisions accept P-1 2>&1 | tail -5",
+            "git add decisions .corrections .claude/settings.json && git commit -qm 'set up ingrain...'",
+            "git checkout -b ingrain-setup && git add -A && git commit -m x",
+            "git commit -m \"$(cat <<'EOF'\nset up ingrain: see ../docs, $HOME and /etc\nEOF\n)\"",
+            "git commit -q -F - <<'EOF'\nSet up ingrain\nEOF",
+            "cat decisions/pending/P-1.yml; ingrain decisions reject P-3 --reason 'too vague'",
+            "ingrain decisions list > notes.txt",
         ] {
-            assert!(leaves_repo(&cmd, &root.join("sub"), &root), "{cmd}");
+            assert!(setup_command(cmd), "{cmd}");
         }
         for cmd in [
-            "ingrain decisions accept P-1 P-2".to_owned(),
-            "git add decisions .corrections && git commit -qm 'set up ingrain...'".to_owned(),
-            "ingrain decisions reject P-3 --reason 'too vague'".to_owned(),
-            format!("cd {r} && ingrain decisions accept P-1"),
-            format!("ingrain --repo {r}/sub/.. decisions accept P-1"),
-            "cd .. && ingrain decisions accept P-1".to_owned(),
-            "git commit -m \"$(cat <<'EOF'\nset up ingrain: see ../docs and /etc\nEOF\n)\""
-                .to_owned(),
+            "sed -i s/a/b/ ../other/decisions/D-0001.yml",
+            "ingrain --repo ../other decisions accept P-1",
+            "ingrain decisions accept P-1 --repo=/x",
+            "cd vendor/lib && ingrain decisions accept P-1",
+            "cd && ingrain decisions accept P-1",
+            "rm blink/decisions/D-0001.yml",
+            "ingrain --repo \"$(echo /x)\" decisions accept P-1",
+            "ingrain decisions accept $P",
+            "git -C vendor/lib commit -m x",
+            "git -c core.hooksPath=/dev/null commit -m x",
+            "git reset --hard HEAD~1",
+            "ingrain decisions accept P-1 > ../x/decisions/D-0001.yml",
+            "ingrain decisions accept P-1 | tee /tmp/log",
+            "python3 -c 'open(\"decisions/D-0001.yml\",\"w\")'",
         ] {
-            assert!(!leaves_repo(&cmd, &root.join("sub"), &root), "{cmd}");
+            assert!(!setup_command(cmd), "{cmd}");
         }
     }
 

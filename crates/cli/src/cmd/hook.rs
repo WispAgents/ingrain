@@ -110,12 +110,8 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
         if tool == "Bash" {
             let command = payload["tool_input"]["command"].as_str().unwrap_or("");
             bash_ask = bash::needs_approval(command);
-            // Only for this repository: a command naming paths outside it (`..`, absolute,
-            // `--repo`, variables) may change another one's ledger, so it's asked as usual.
-            if bash_ask.is_some()
-                && !bash::leaves_repo(command, dir, git.root())
-                && is_first_setup(&git)
-            {
+            // Only setup's own commands, which can't reach another repository's ledger.
+            if bash_ask.is_some() && bash::setup_command(command) && is_first_setup(&git) {
                 first_setup = true;
                 bash_ask = bash::skips_verification(command);
             }
@@ -361,10 +357,15 @@ fn post_tool_use(
             return Ok(None);
         };
         let mut changed = bash::changed(&before.files, &bash::snapshot(&repo.git));
-        if let (Some(from), Some(to)) = (&before.head, bash::head(&repo.git))
-            && *from != to
-        {
-            changed.extend(bash::moved(&repo.git, from, &to));
+        let now_head = bash::head(&repo.git);
+        let moved_head = before.head.is_some() && before.head != now_head
+            || before.head.is_none() && now_head.is_some();
+        if moved_head && let Some(to) = &now_head {
+            match &before.head {
+                Some(from) => changed.extend(bash::moved(&repo.git, from, to)),
+                // The first commit: everything in it.
+                None => changed.extend(bash::tracked(&repo.git)),
+            }
             changed.sort();
             changed.dedup();
         }
@@ -373,10 +374,27 @@ fn post_tool_use(
         // A file whose content is what it was before the command was only recorded by it
         // (committed, staged); its content was checked when it changed. Reviewed files are
         // stamped with a content hash, so keeping the size and mtime doesn't hide an edit.
+        // A commit must also hold what was on disk, not something staged around it
+        // (`git apply --cached`).
+        let recorded = |p: &str| {
+            let Some(was) = before.files.get(p) else {
+                return false;
+            };
+            if *was != bash::stamp_of(&repo.git, p) {
+                return false;
+            }
+            !moved_head
+                || now_head
+                    .as_deref()
+                    .is_some_and(|head| match repo.git.show(head, p) {
+                        Some(text) => bash::stamp_holds(was, text.as_bytes()),
+                        None => was == "deleted",
+                    })
+        };
         let reviewed: Vec<&String> = changed
             .iter()
             .filter(|p| bash::is_reviewed_file(p))
-            .filter(|p| before.files.get(*p) != Some(&bash::stamp_of(&repo.git, p)))
+            .filter(|p| !recorded(p))
             .collect();
         if !before.asked && !reviewed.is_empty() {
             // The person may have edited it meanwhile, so don't tell the agent to restore it.
