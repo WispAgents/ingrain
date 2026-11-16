@@ -58,14 +58,25 @@ impl Repo {
 
     /// Take accepted rules and config from `rev` from now on. Without this, a change could
     /// delete a rule, set it to shadow or ignore its path, and break it in the same diff.
+    ///
+    /// A config at `rev` that doesn't parse is reported and the working tree's is kept: the
+    /// commit that repairs it must not be blocked by it.
     pub fn pin_to(&mut self, rev: &str) -> Result<()> {
         let config = match self.git.show(rev, ".corrections/config.yml") {
-            Some(text) => serde_yaml::from_str(&text)
-                .with_context(|| format!("invalid .corrections/config.yml at {rev}"))?,
-            None => Config::default(),
+            Some(text) => serde_yaml::from_str::<Config>(&text)
+                .map_err(anyhow::Error::from)
+                .and_then(|c| ignore_set(&c).map(|set| (c, set))),
+            None => ignore_set(&Config::default()).map(|set| (Config::default(), set)),
         };
-        self.ignore = ignore_set(&config)?;
-        self.config = config;
+        match config {
+            Ok((config, set)) => {
+                self.config = config;
+                self.ignore = set;
+            }
+            Err(e) => eprintln!(
+                "ingrain: .corrections/config.yml at {rev} is broken ({e:#}); using the working tree's"
+            ),
+        }
         self.pinned = Some(rev.to_owned());
         Ok(())
     }
@@ -98,10 +109,11 @@ impl Repo {
                 .git
                 .show(rev, path)
                 .with_context(|| format!("reading {path} at {rev}"))?;
-            rules.push(
-                RuleFile::parse(&text, self.git.root().join(path))
-                    .with_context(|| format!("parsing {path} at {rev}"))?,
-            );
+            // A broken rule is skipped, as in `compiled_rules`, so the fix can be committed.
+            match RuleFile::parse(&text, self.git.root().join(path)) {
+                Ok(rule) => rules.push(rule),
+                Err(e) => eprintln!("ingrain: skipping {path} at {rev}: {e:#}"),
+            }
         }
         rules.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(rules)

@@ -114,13 +114,6 @@ pub fn find(rules: &[(RuleFile, CompiledRule)], targets: &[Target]) -> Vec<Findi
     out
 }
 
-fn is_comment_line(text: &str) -> bool {
-    let t = text.trim_start();
-    ["//", "#", "--", "/*", "<!--", ";", "{/*", "*"]
-        .iter()
-        .any(|m| t.starts_with(m))
-}
-
 /// Look for `ingrain-ignore <rule>: <reason>` on the hit line or the line above.
 fn ignore_comment(lines: &[&str], line: u32, rule: &str) -> (Option<String>, bool) {
     let idx = line as usize - 1;
@@ -129,7 +122,7 @@ fn ignore_comment(lines: &[&str], line: u32, rule: &str) -> (Option<String>, boo
         let Some(text) = lines.get(i) else { continue };
         // The line above counts only when it is just the comment: a trailing ignore on other
         // code covers that code, not a new line added under it.
-        if i != idx && !is_comment_line(text) {
+        if i != idx && !ingrain_ledger::check::is_comment_only(text) {
             continue;
         }
         // A line may carry several ignores: `ingrain-ignore a: x; ingrain-ignore b: y`.

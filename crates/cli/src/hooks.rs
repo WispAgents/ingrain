@@ -135,19 +135,27 @@ fn add_hook(hooks: &mut Value, event: &str, matcher: Option<&str>, command: &str
     let list = list
         .as_array_mut()
         .with_context(|| format!("`hooks.{event}` is not an array"))?;
-    if let Some(group) = list.iter_mut().find(|group| {
+    let has_command = |group: &Value| {
         group["hooks"]
             .as_array()
             .is_some_and(|hs| hs.iter().any(|h| h["command"] == command))
-    }) {
-        // Installed by an older ingrain with fewer tools: widen the matcher.
-        return Ok(match matcher {
-            Some(m) if group["matcher"] != m => {
-                group["matcher"] = json!(m);
-                true
-            }
-            _ => false,
-        });
+    };
+    if let Some(i) = list.iter().position(has_command) {
+        let up_to_date = matcher.is_none_or(|m| list[i]["matcher"] == m);
+        if up_to_date {
+            return Ok(false);
+        }
+        // Installed by an older ingrain with fewer tools. Widen the matcher of ingrain's own
+        // group; in a group shared with the user's hooks, move ingrain's command out instead,
+        // so their hooks don't start running on every tool.
+        let alone = list[i]["hooks"].as_array().is_some_and(|hs| hs.len() == 1);
+        if alone {
+            list[i]["matcher"] = json!(matcher);
+            return Ok(true);
+        }
+        if let Some(hs) = list[i]["hooks"].as_array_mut() {
+            hs.retain(|h| h["command"] != command);
+        }
     }
     let mut group = json!({ "hooks": [{ "type": "command", "command": command }] });
     if let Some(m) = matcher {

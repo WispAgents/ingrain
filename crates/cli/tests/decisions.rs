@@ -635,9 +635,33 @@ fn enforcement_gaps_shell_config_overrides_and_ci() {
         .filter_map(Value::as_str)
         .collect();
     assert_eq!(edited, vec!["src/new.ts"], "only what the command changed");
-    assert!(session["bash"].as_object().unwrap().is_empty());
+    // Only the two asked commands, which never ran here, still have snapshots.
+    let pending: Vec<&String> = session["bash"].as_object().unwrap().keys().collect();
+    assert_eq!(pending, ["t1", "t2"]);
     std::fs::remove_file(dir.join("src/new.ts")).unwrap();
     std::fs::remove_file(dir.join("src/notes.ts")).unwrap();
+
+    // What the pre-check can't read (a path in a variable) is caught after the command runs.
+    let sneaky = bash(
+        "t5",
+        "D=decisions; sed -i s/accepted/superseded/ $D/D-0001.yml",
+    );
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", sneaky.clone())), "");
+    let record = std::fs::read_to_string(dir.join("decisions/D-0001.yml")).unwrap();
+    std::fs::write(
+        dir.join("decisions/D-0001.yml"),
+        record.replace("status: accepted", "status: superseded"),
+    )
+    .unwrap();
+    let after = hook(dir, "post-tool-use", sneaky).expect("post hook answers");
+    assert_eq!(after["decision"], "block");
+    assert!(
+        after["reason"]
+            .as_str()
+            .unwrap()
+            .contains("decisions/D-0001.yml")
+    );
+    git(dir, &["checkout", "-q", "--", "decisions/D-0001.yml"]);
 
     // The config is reviewed too, and a broken one doesn't switch the hooks off.
     let config = json!({"session_id": "c", "cwd": dir, "tool_name": "Write",

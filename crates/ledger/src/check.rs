@@ -222,10 +222,35 @@ fn ignore_reason(lines: &[&str], line: u32, id: &str) -> Option<String> {
 }
 
 /// A line holding nothing but a comment.
-fn is_comment_only(line: &str) -> bool {
-    const MARKERS: &[&str] = &["//", "#", "--", "/*", "<!--", ";", "{/*"];
-    let t = line.trim_start();
-    MARKERS.iter().any(|m| t.starts_with(m))
+/// A line holding only a comment (so an ignore on it covers the next line). Shared by decision
+/// and rule overrides.
+pub fn is_comment_only(line: &str) -> bool {
+    let t = line.trim();
+    // `#include`, `#[derive]`, `#!`: code that starts with `#`.
+    const HASH_CODE: &[&str] = &[
+        "#[",
+        "#!",
+        "#include",
+        "#define",
+        "#if",
+        "#else",
+        "#endif",
+        "#import",
+        "#pragma",
+        "#undef",
+        "#region",
+        "#endregion",
+    ];
+    if t.starts_with('#') {
+        return !HASH_CODE.iter().any(|c| t.starts_with(c));
+    }
+    // `-- note` (SQL, Lua, Haskell), not `--i;`.
+    if let Some(rest) = t.strip_prefix("--") {
+        return rest.is_empty() || rest.starts_with(' ') || rest.starts_with('-');
+    }
+    ["//", "/*", "<!--", "{/*", "*", ";"]
+        .iter()
+        .any(|m| t.starts_with(m))
 }
 
 /// Dependencies the change adds to a manifest (empty for other files or unparsable ones).

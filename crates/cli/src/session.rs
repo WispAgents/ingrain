@@ -26,6 +26,9 @@ pub struct BashSnapshot {
     /// Seconds since the epoch; snapshots of commands that never finished are dropped later.
     pub time: u64,
     pub files: BTreeMap<String, String>,
+    /// The person was asked to approve this command (so it may change reviewed files).
+    #[serde(default)]
+    pub asked: bool,
 }
 
 impl Session {

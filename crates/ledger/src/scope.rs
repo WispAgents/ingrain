@@ -76,7 +76,9 @@ fn parse(raw: &str) -> Option<Entry> {
         // everything under a directory of that name; for `README`, `README.md` too).
         let mut patterns = vec![format!("**/{s}")];
         if s.starts_with('.') {
+            // `.env` also covers `.env.local`.
             patterns.push(format!("**/{s}/**"));
+            patterns.push(format!("**/{s}.*"));
         } else if !s.contains('.') {
             patterns.push(format!("**/{s}.*"));
         }

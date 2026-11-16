@@ -94,23 +94,18 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
 
     // Accepted decisions, rules and config are reviewed by people; agents propose instead.
     // Checked before anything else is loaded, so a broken config or ledger can't switch it off.
+    let mut bash_ask = None;
     if let Event::PreToolUse = event {
         let git = ingrain_core::Git::open(dir)?;
         if let Some(rel) = edited_path(&git, payload)
             && bash::is_reviewed_file(&rel)
         {
-            return Ok(Some(deny(format!(
-                "`{rel}` is reviewed by people; agents don't edit it. To change a decision, run \
-                 `ingrain decisions supersede <id> --decision \"...\" --reason \"...\"`; to record a new one, \
-                 `ingrain decisions add --propose \"...\"`. A person accepts both."
-            ))));
+            return Ok(Some(deny(reviewed_message(&rel))));
         }
-        if tool == "Bash"
-            && let Some(why) = payload["tool_input"]["command"]
+        if tool == "Bash" {
+            bash_ask = payload["tool_input"]["command"]
                 .as_str()
-                .and_then(bash::needs_approval)
-        {
-            return Ok(Some(ask(format!("ingrain: {why}"))));
+                .and_then(bash::needs_approval);
         }
     }
 
@@ -124,15 +119,17 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
     let answer = match event {
         Event::SessionStart => session_start(&decisions, &mut session, payload),
         Event::PreToolUse if tool == "Bash" => {
-            // Remember what was already changed, to tell what the command changes.
+            // Remember what was already changed, to tell what the command changes. Also
+            // before an ask: an approved command's other changes are still checked.
             if let Some(id) = &tool_use_id {
                 let snap = BashSnapshot {
                     time: crate::session::now(),
                     files: bash::snapshot(&repo.git),
+                    asked: bash_ask.is_some(),
                 };
                 session.bash.insert(id.clone(), snap);
             }
-            None
+            bash_ask.map(|why| ask(format!("ingrain: {why}")))
         }
         Event::PreToolUse => pre_tool_use(&repo, &decisions, &mut session, payload),
         Event::PostToolUse => post_tool_use(&repo, &decisions, &mut session, payload)?,
@@ -152,6 +149,14 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
 
 fn context(event: &str, text: String) -> Value {
     json!({ "hookSpecificOutput": { "hookEventName": event, "additionalContext": text } })
+}
+
+fn reviewed_message(rel: &str) -> String {
+    format!(
+        "`{rel}` is reviewed by people; agents don't edit it. To change a decision, run \
+         `ingrain decisions supersede <id> --decision \"...\" --reason \"...\"`; to record a new one, \
+         `ingrain decisions add --propose \"...\"`. A person accepts both."
+    )
 }
 
 /// Let the person decide in Claude Code's permission prompt.
@@ -274,7 +279,26 @@ fn post_tool_use(
         else {
             return Ok(None);
         };
-        bash::changed(&before.files, &bash::snapshot(&repo.git))
+        let changed = bash::changed(&before.files, &bash::snapshot(&repo.git));
+        // The pre-check reads shell syntax and can be fooled (variables, globs); this sees
+        // what actually changed. Commands the person approved may change reviewed files.
+        let reviewed: Vec<&String> = changed
+            .iter()
+            .filter(|p| bash::is_reviewed_file(p))
+            .collect();
+        if !before.asked && !reviewed.is_empty() {
+            let list: Vec<String> = reviewed.iter().map(|p| format!("`{p}`")).collect();
+            return Ok(Some(json!({ "decision": "block", "reason": format!(
+                "That command changed {}, which people review; agents don't edit it. Restore it \
+                 (`git checkout -- <path>`) and tell the user. {}",
+                list.join(", "),
+                reviewed_message(reviewed[0]).split_once(". ").map_or("", |(_, rest)| rest)
+            ) })));
+        }
+        changed
+            .into_iter()
+            .filter(|p| repo.git.root().join(p).is_file())
+            .collect()
     } else {
         edited_path(&repo.git, payload).into_iter().collect()
     };

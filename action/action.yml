@@ -47,10 +47,16 @@ runs:
       shell: bash
       env:
         INGRAIN_BASE: ${{ inputs.base }}
+        PUSH_BEFORE: ${{ github.event.before }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
-        # Outside pull requests (push, workflow_dispatch) there's no PR base: compare with the
-        # default branch rather than diffing nothing.
+        # Outside pull requests there's no PR base. On a push, check what the push added; else
+        # (workflow_dispatch, a new branch) compare with the default branch.
+        if [ -z "$INGRAIN_BASE" ] && [ -n "$PUSH_BEFORE" ] \
+          && [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ] \
+          && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+          INGRAIN_BASE="$PUSH_BEFORE"
+        fi
         if [ -z "$INGRAIN_BASE" ]; then
           if [ -z "$DEFAULT_BRANCH" ]; then
             echo "::error::no base revision; set the action's 'base' input"
