@@ -19,7 +19,7 @@
             "command": "command -v ingrain >/dev/null 2>&1 && ingrain hook pre-tool-use --from-plugin || true"
           }
         ],
-        "matcher": "Edit|Write|MultiEdit"
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash"
       }
     ],
     "PostToolUse": [
@@ -30,7 +30,7 @@
             "command": "command -v ingrain >/dev/null 2>&1 && ingrain hook post-tool-use --from-plugin || true"
           }
         ],
-        "matcher": "Edit|Write|MultiEdit"
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash"
       }
     ],
     "Stop": [

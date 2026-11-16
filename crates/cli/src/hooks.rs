@@ -10,10 +10,13 @@ fn guarded(event: &str) -> String {
 }
 
 /// The Claude Code hook events ingrain answers, with their tool matcher.
+/// Bash is included: shell commands can write files too.
+pub const TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash";
+
 const EVENTS: &[(&str, Option<&str>, &str)] = &[
     ("SessionStart", None, "session-start"),
-    ("PreToolUse", Some("Edit|Write|MultiEdit"), "pre-tool-use"),
-    ("PostToolUse", Some("Edit|Write|MultiEdit"), "post-tool-use"),
+    ("PreToolUse", Some(TOOLS), "pre-tool-use"),
+    ("PostToolUse", Some(TOOLS), "post-tool-use"),
     ("Stop", None, "stop"),
 ];
 
@@ -132,13 +135,27 @@ fn add_hook(hooks: &mut Value, event: &str, matcher: Option<&str>, command: &str
     let list = list
         .as_array_mut()
         .with_context(|| format!("`hooks.{event}` is not an array"))?;
-    let present = list.iter().any(|group| {
+    let has_command = |group: &Value| {
         group["hooks"]
             .as_array()
             .is_some_and(|hs| hs.iter().any(|h| h["command"] == command))
-    });
-    if present {
-        return Ok(false);
+    };
+    if let Some(i) = list.iter().position(has_command) {
+        let up_to_date = matcher.is_none_or(|m| list[i]["matcher"] == m);
+        if up_to_date {
+            return Ok(false);
+        }
+        // Installed by an older ingrain with fewer tools. Widen the matcher of ingrain's own
+        // group; in a group shared with the user's hooks, move ingrain's command out instead,
+        // so their hooks don't start running on every tool.
+        let alone = list[i]["hooks"].as_array().is_some_and(|hs| hs.len() == 1);
+        if alone {
+            list[i]["matcher"] = json!(matcher);
+            return Ok(true);
+        }
+        if let Some(hs) = list[i]["hooks"].as_array_mut() {
+            hs.retain(|h| h["command"] != command);
+        }
     }
     let mut group = json!({ "hooks": [{ "type": "command", "command": command }] });
     if let Some(m) = matcher {
@@ -148,9 +165,21 @@ fn add_hook(hooks: &mut Value, event: &str, matcher: Option<&str>, command: &str
     Ok(true)
 }
 
-/// Write `.git/hooks/pre-commit`, unless another pre-commit hook already exists.
-pub fn install_pre_commit(git_dir: &Path) -> Result<Outcome> {
-    let path = git_dir.join("hooks").join("pre-commit");
+/// The hooks directory git actually runs: `core.hooksPath` when set, and the main repository's
+/// `.git/hooks` from a linked worktree.
+pub fn hooks_dir(git: &ingrain_core::Git) -> Result<std::path::PathBuf> {
+    let out = git.run(&["rev-parse", "--git-path", "hooks"])?;
+    let path = std::path::PathBuf::from(ingrain_core::git::normalize_path(out.trim()));
+    Ok(if path.is_absolute() {
+        path
+    } else {
+        git.root().join(path)
+    })
+}
+
+/// Write `<hooks dir>/pre-commit`, unless another pre-commit hook already exists.
+pub fn install_pre_commit(hooks_dir: &Path) -> Result<Outcome> {
+    let path = hooks_dir.join("pre-commit");
     if path.exists() {
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
         if existing.contains(PRE_COMMIT_MARKER) {
@@ -198,10 +227,7 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(v["model"], "x");
         assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 2);
-        assert_eq!(
-            v["hooks"]["PostToolUse"][0]["matcher"],
-            "Edit|Write|MultiEdit"
-        );
+        assert_eq!(v["hooks"]["PostToolUse"][0]["matcher"], TOOLS);
     }
 
     #[test]
@@ -228,6 +254,22 @@ mod tests {
     }
 
     #[test]
+    fn widens_old_matchers() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let old = json!({"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit",
+            "hooks": [{"type": "command", "command": guarded("pre-tool-use")}]}]}});
+        std::fs::write(&settings, old.to_string()).unwrap();
+        assert_eq!(install_claude(dir.path()).unwrap(), Outcome::Installed);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        let pre = v["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 1);
+        assert_eq!(pre[0]["matcher"], TOOLS);
+        assert_eq!(install_claude(dir.path()).unwrap(), Outcome::AlreadyPresent);
+    }
+
+    #[test]
     fn legacy_match_is_exact() {
         assert!(is_legacy(
             "command -v ingrain >/dev/null 2>&1 && ingrain check --hook post-edit || true"
@@ -246,7 +288,7 @@ mod tests {
             install_pre_commit(dir.path()).unwrap(),
             Outcome::AlreadyPresent
         );
-        std::fs::write(dir.path().join("hooks/pre-commit"), "#!/bin/sh\nnpm test\n").unwrap();
+        std::fs::write(dir.path().join("pre-commit"), "#!/bin/sh\nnpm test\n").unwrap();
         assert!(matches!(
             install_pre_commit(dir.path()).unwrap(),
             Outcome::Skipped(_)

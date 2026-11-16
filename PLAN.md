@@ -181,3 +181,11 @@ Goal: a developer adds ingrain to their agent and repo in one or two commands.
   (157 corrections, templates only): min 3 → 0 rules, min 1 → 13 rules. Real hits among them
   (`PluginSQL` → `PermissionSQL` rename), plus one-off noise (`r3`); review filters it.
 - README no longer quotes the public-repo verdict; docs/validation.md keeps the study.
+
+# v0.2.3: review fixes (PR #8)
+
+- Enforcement: Bash hooks (ask before writing reviewed files or skipping hooks; check changed files after),
+  protected config, CI/pre-commit pin rules and config to the base, override approval and CI annotations.
+- Ledger: line-above override scope, dedupe polarity/numbers, file-name scopes, `*` within one directory.
+- Rules: one correction still proposes a rule, without self-certification; single-fix one-offs held back
+  (still common today, generic name, test-only). datasette: 33 candidates → 7 proposed, 12 held back.

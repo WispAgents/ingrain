@@ -53,8 +53,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         };
         return super::hook::run(dir, event, false);
     }
-    let repo = Repo::open(dir)?;
-    let rules = repo.compiled_rules()?;
+    let mut repo = Repo::open(dir)?;
     let (base, context) = if args.staged {
         (DiffBase::Staged, "staged")
     } else if let Some(range) = &args.diff {
@@ -65,12 +64,17 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     } else {
         (DiffBase::Head, "manual")
     };
-    // Pre-commit and CI judge a change by the decisions it started from, so one change can't
-    // retire a decision and break it. By hand, the working tree's ledger counts.
+    // Pre-commit and CI judge a change by the decisions, rules and config it started from, so
+    // one change can't retire a decision or rule (or ignore its path) and break it. By hand, the
+    // working tree counts.
     let decisions = match (&base, base.before_rev(&repo.git)) {
         (DiffBase::Head, _) | (_, None) => repo.ledger.live()?,
-        (_, Some(rev)) => repo.ledger.live_at(&repo.git, &rev)?,
+        (_, Some(rev)) => {
+            repo.pin_to(&rev)?;
+            repo.ledger.live_at(&repo.git, &rev)?
+        }
     };
+    let rules = repo.compiled_rules()?;
     let ledger_changes = if base == DiffBase::Head {
         Vec::new()
     } else {
@@ -136,13 +140,42 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
                     ))
                 );
             }
+            // Overrides on added lines are shown, so a reviewer sees every exception the
+            // change makes (an agent can write an ignore comment too).
+            for f in visible.iter().filter(|f| !f.is_active()) {
+                println!(
+                    "::warning file={},line={},title={}::{}",
+                    escape_property(&f.path),
+                    f.line,
+                    escape_property(&format!("ingrain rule {} overridden", f.rule)),
+                    escape(&format!(
+                        "Overridden: {}. Reason given: {}",
+                        f.message,
+                        f.override_reason.as_deref().unwrap_or("")
+                    ))
+                );
+            }
+            for v in violations.iter().filter(|v| v.overridden.is_some()) {
+                println!(
+                    "::warning file={},line={},title={}::{}",
+                    escape_property(&v.path),
+                    v.line,
+                    escape_property(&format!("decision {} overridden", v.decision)),
+                    escape(&format!(
+                        "Overridden: {}. {}. Reason given: {}",
+                        v.what,
+                        decision_line(&decisions, &v.decision),
+                        v.overridden.as_deref().unwrap_or("")
+                    ))
+                );
+            }
             for f in &ledger_changes {
                 println!(
                     "::notice file={},title={}::{}",
                     escape_property(f),
-                    escape_property("decision ledger changed"),
+                    escape_property("ingrain ledger changed"),
                     escape(
-                        "This change edits the decision ledger; it was checked against the decisions it started from."
+                        "This change edits decisions, learned rules or ingrain config; it was checked against the versions it started from."
                     )
                 );
             }
@@ -169,7 +202,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
             }
             for f in &ledger_changes {
                 println!(
-                    "note: this change edits {f}; it was checked against the decisions it started from"
+                    "note: this change edits {f}; it was checked against the version it started from"
                 );
             }
             let shadow = findings.len() - visible.len();
@@ -197,18 +230,19 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     })
 }
 
-/// Ledger files a diff changes, other than proposals.
+/// Reviewed ingrain files a diff changes: decisions, accepted rules, config, rejections.
+/// Proposals don't count.
 fn ledger_changes(repo: &Repo, base: &DiffBase) -> Vec<String> {
-    repo.git
-        .diff(base, Some(ingrain_ledger::record::Ledger::DIR))
-        .map(|files| {
-            files
-                .into_iter()
-                .filter_map(|f| f.new_path.or(f.old_path))
-                .filter(|p| !p.contains("/pending/"))
-                .collect()
-        })
-        .unwrap_or_default()
+    [
+        ingrain_ledger::record::Ledger::DIR,
+        ingrain_core::layout::CORRECTIONS_DIR,
+    ]
+    .iter()
+    .filter_map(|dir| repo.git.diff(base, Some(dir)).ok())
+    .flatten()
+    .filter_map(|f| f.new_path.or(f.old_path))
+    .filter(|p| !p.contains("/pending/"))
+    .collect()
 }
 
 pub fn decision_line(records: &[Record], id: &str) -> String {

@@ -61,7 +61,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     if !args.no_git_hook {
         report(
             "git pre-commit hook",
-            hooks::install_pre_commit(repo.git.git_dir())?,
+            hooks::install_pre_commit(&hooks::hooks_dir(&repo.git)?)?,
         );
     }
     println!(

@@ -105,7 +105,7 @@ fn describe_failure(yaml: &str, s: &Score, n: usize) -> String {
     }
     if let Some(p) = s.precision() {
         problems.push(format!(
-            "on other agent code it fired {} times on lines humans kept and {} times on lines they corrected (precision {:.0}%)",
+            "on other agent code it fired {} times on lines humans kept and caught {} corrections (precision {:.0}%)",
             s.false_hits,
             s.true_hits,
             p * 100.0

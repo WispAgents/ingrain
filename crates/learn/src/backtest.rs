@@ -1,5 +1,6 @@
 //! Score a candidate rule against history.
 
+use crate::cluster;
 use ingrain_core::{AgentHunk, Backtest, Correction, LineRange, Snippet};
 use ingrain_engine::{CompiledRule, Parsed, lang};
 use std::collections::{HashMap, HashSet};
@@ -10,7 +11,7 @@ pub struct Score {
     pub backtest: Backtest,
     /// Correction indices (into the cluster's slice) whose agent code the rule flags.
     pub caught: Vec<usize>,
-    /// Hits on lines humans later corrected.
+    /// Corrections whose agent lines the rule hit (cluster's own source hunks held out).
     pub true_hits: u32,
     /// Hits on agent lines humans kept.
     pub false_hits: u32,
@@ -66,11 +67,16 @@ pub fn flags(rule: &CompiledRule, path: &str, snippet: &Snippet) -> bool {
 pub struct Judged {
     /// (line in the snippet, was it a true positive)
     pub hits: Vec<(u32, bool)>,
+    /// Distinct corrections behind the true hits. A fix that rewrote three flagged
+    /// lines is one mistake caught, not three, so true positives are counted per
+    /// correction; false hits stay per line (each is a separate warning on kept code).
+    pub true_corrections: Vec<String>,
 }
 
 impl Judged {
+    /// Corrections this hunk's hits caught (not lines).
     pub fn true_hits(&self) -> u32 {
-        self.hits.iter().filter(|(_, t)| *t).count() as u32
+        self.true_corrections.len() as u32
     }
     pub fn false_hits(&self) -> u32 {
         self.hits.iter().filter(|(_, t)| !*t).count() as u32
@@ -98,18 +104,23 @@ pub fn judge(
         if !range.overlaps(&hunk.snippet.changed) || !seen.insert(hit.start_line) {
             continue;
         }
-        let is_true = hunk
+        let by = hunk
             .corrected
             .iter()
             .filter(|c| known(c.time) && c.lines.overlaps(&range))
-            .any(|c| {
+            .find(|c| {
                 *relevant.entry(c.correction.clone()).or_insert_with(|| {
                     corrections
                         .get(c.correction.as_str())
                         .is_some_and(|corr| flags(rule, &corr.path, &corr.before))
                 })
             });
-        out.hits.push((hit.start_line, is_true));
+        if let Some(c) = by
+            && !out.true_corrections.contains(&c.correction)
+        {
+            out.true_corrections.push(c.correction.clone());
+        }
+        out.hits.push((hit.start_line, by.is_some()));
     }
     out
 }
@@ -123,6 +134,14 @@ pub fn judge(
 /// of a renamed API), and `known_before` keeps a time-split evaluation from seeing
 /// the future. `all` maps correction ids to corrections, to check that a hit on
 /// corrected lines is about what the human fixed.
+///
+/// The hunks the cluster's own corrections were mined from are held out: a rule
+/// always fires on the code it was learned from, so those hits say nothing about
+/// precision. Each source hunk is held out per fix event (leave-one-event-out): it is
+/// scored only when the rule also catches a correction from *another* fix event, so
+/// it then tests a rule that fix event alone would not have produced. With a single
+/// fix event every source hunk is excluded, and the rule has precision evidence only
+/// if it fires on other agent code.
 #[allow(clippy::too_many_arguments)]
 pub fn score(
     rule: &CompiledRule,
@@ -148,12 +167,36 @@ pub fn score(
         }
     }
 
+    // Fix event of each of the cluster's corrections, and the events the rule catches.
+    let event_of: HashMap<&str, String> = corrections
+        .iter()
+        .map(|c| (c.id.as_str(), cluster::source_key(c)))
+        .collect();
+    let caught_events: HashSet<&str> = s
+        .caught
+        .iter()
+        .map(|&i| event_of[corrections[i].id.as_str()].as_str())
+        .collect();
+    let own_only = |h: &AgentHunk| {
+        let own: HashSet<&str> = h
+            .corrected
+            .iter()
+            .filter_map(|l| event_of.get(l.correction.as_str()))
+            .map(String::as_str)
+            .collect();
+        !own.is_empty() && caught_events.iter().all(|e| own.contains(e))
+    };
+
     let known = |t: i64| t < known_before;
     let mut relevant = HashMap::new();
+    let mut true_corrections: HashSet<String> = HashSet::new();
     for h in hunks
         .iter()
         .filter(|h| h.time >= since && h.time < known_before)
     {
+        if own_only(h) {
+            continue;
+        }
         if prefilter.is_some_and(|p| !h.snippet.text.contains(p)) || !rule.applies_to(&h.path) {
             continue;
         }
@@ -163,10 +206,12 @@ pub fn score(
         s.backtest.kept += 1;
         let parsed = Parsed::new(language, &h.snippet.text);
         let judged = judge(rule, &parsed, h, all, &known, &mut relevant);
-        s.true_hits += judged.true_hits();
+        // One correction split across chunks of the same commit still counts once.
+        true_corrections.extend(judged.true_corrections.iter().cloned());
         s.false_hits += judged.false_hits();
         s.backtest.kept_hits += judged.false_hits();
     }
+    s.true_hits = true_corrections.len() as u32;
     s
 }
 
@@ -221,14 +266,24 @@ pub(crate) mod tests {
             "await api.get(u);",
             "f",
         );
+        // A second fix event, so c's own hunk tests a rule `g` alone would also give.
+        let other = correction("2", "TypeScript", "fetch(w);", "api.get(w);", "g");
         let hunks = vec![
             hunk("a();\nawait fetch(u);", Some(LineRange::new(2, 2)), 1),
             hunk("await fetch(v);", None, 1),
             hunk("nothing here", None, 1),
         ];
-        let all = by_id([&c]);
-        let s = score(&rule, &[&c], &hunks, &all, Some("fetch"), 0, i64::MAX);
-        assert_eq!(s.backtest.before_hits, 1);
+        let all = by_id([&c, &other]);
+        let s = score(
+            &rule,
+            &[&c, &other],
+            &hunks,
+            &all,
+            Some("fetch"),
+            0,
+            i64::MAX,
+        );
+        assert_eq!(s.backtest.before_hits, 2);
         assert_eq!(s.backtest.after_hits, 0);
         assert_eq!(s.true_hits, 1);
         assert_eq!(s.false_hits, 1);
@@ -237,6 +292,47 @@ pub(crate) mod tests {
             s.backtest.kept, 2,
             "prefilter skipped the hunk without `fetch`"
         );
+    }
+
+    #[test]
+    fn a_single_fix_does_not_certify_itself() {
+        let rule = CompiledRule::compile(RULE).unwrap();
+        // One fix rewrote three fetch lines of one agent hunk.
+        let text = "x = fetch(a);\ny = fetch(b);\nz = fetch(c);";
+        let c = correction("1", "TypeScript", text, "x = api.get(a);", "f");
+        let all = by_id([&c]);
+        let hunks = vec![hunk(text, Some(LineRange::new(1, 3)), 1)];
+        let s = score(&rule, &[&c], &hunks, &all, None, 0, i64::MAX);
+        assert_eq!(s.caught, vec![0]);
+        assert_eq!((s.true_hits, s.false_hits), (0, 0), "own hunk held out");
+        assert_eq!(s.backtest.kept, 0);
+        assert_eq!(s.precision_lower_bound(), None);
+
+        // The same hunk judged for a rule from another cluster: one correction, one true hit.
+        let s = score(&rule, &[], &hunks, &all, None, 0, i64::MAX);
+        assert_eq!(
+            (s.true_hits, s.false_hits),
+            (1, 0),
+            "per correction, not per line"
+        );
+    }
+
+    #[test]
+    fn source_hunks_count_when_another_fix_supports_the_rule() {
+        let rule = CompiledRule::compile(RULE).unwrap();
+        let a = correction("1", "TypeScript", "fetch(a);", "api.get(a);", "f1");
+        let b = correction("2", "TypeScript", "fetch(b);", "api.get(b);", "f2");
+        let all = by_id([&a, &b]);
+        let mut hb = hunk("fetch(b);", Some(LineRange::new(1, 1)), 1);
+        hb.corrected[0].correction = "2".into();
+        let hunks = vec![hunk("fetch(a);", Some(LineRange::new(1, 1)), 1), hb];
+        let s = score(&rule, &[&a, &b], &hunks, &all, None, 0, i64::MAX);
+        assert_eq!((s.true_hits, s.false_hits), (2, 0));
+        // Two corrections from one commit are one fix event: both hunks held out.
+        let b1 = correction("2", "TypeScript", "fetch(b);", "api.get(b);", "f1");
+        let all = by_id([&a, &b1]);
+        let s = score(&rule, &[&a, &b1], &hunks, &all, None, 0, i64::MAX);
+        assert_eq!((s.true_hits, s.false_hits), (0, 0));
     }
 
     #[test]

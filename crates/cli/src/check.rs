@@ -120,6 +120,11 @@ fn ignore_comment(lines: &[&str], line: u32, rule: &str) -> (Option<String>, boo
     let mut missing_reason = false;
     for i in [idx.checked_sub(1), Some(idx)].into_iter().flatten() {
         let Some(text) = lines.get(i) else { continue };
+        // The line above counts only when it is just the comment: a trailing ignore on other
+        // code covers that code, not a new line added under it.
+        if i != idx && !ingrain_ledger::check::is_comment_only(text) {
+            continue;
+        }
         // A line may carry several ignores: `ingrain-ignore a: x; ingrain-ignore b: y`.
         for (pos, _) in text.match_indices("ingrain-ignore") {
             let rest = text[pos + "ingrain-ignore".len()..].trim_start();
@@ -180,7 +185,7 @@ pub fn agent_message(findings: &[&Finding], blocking: bool) -> String {
     if blocking {
         msg.push_str(
             "\nFix these before finishing. If the code is right as written, keep it and add a comment \
-             `ingrain-ignore <rule-id>: <reason>` on that line.\n",
+             `ingrain-ignore <rule-id>: <reason>` on that line; the person is asked to approve it.\n",
         );
     }
     msg
@@ -199,13 +204,17 @@ mod tests {
             "await fetch(w); // ingrain-ignore avoid-fetch-call-2: other rule",
             "x",
             "f(); // ingrain-ignore other: a; ingrain-ignore avoid-fetch-call: b",
+            "await fetch(z);",
         ];
+        // A trailing ignore on the line above covers that line only.
+        assert_eq!(ignore_comment(&lines, 7, "avoid-fetch-call"), (None, false));
         assert_eq!(
             ignore_comment(&lines, 2, "avoid-fetch-call"),
             (Some("streaming endpoint".into()), false)
         );
         assert_eq!(ignore_comment(&lines, 3, "avoid-fetch-call"), (None, true));
-        assert_eq!(ignore_comment(&lines, 4, "avoid-fetch-call"), (None, true));
+        // Line 3's trailing comment (no reason) covers line 3 only.
+        assert_eq!(ignore_comment(&lines, 4, "avoid-fetch-call"), (None, false));
         assert_eq!(
             ignore_comment(&lines, 6, "avoid-fetch-call"),
             (Some("b".into()), false)

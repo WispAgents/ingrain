@@ -2,16 +2,18 @@ name: ingrain check
 description: Fail pull requests whose added lines break recorded decisions or rules learned from corrections of agent code.
 inputs:
   base:
-    description: Revision to diff against. Defaults to the pull request base.
+    description: Revision to diff against. Defaults to the pull request base; outside pull requests, the default branch.
     default: ${{ github.event.pull_request.base.sha }}
   version:
     description: Release of WispAgents/ingrain to use.
-    default: v0.2.2
+    default: v0.2.3
 runs:
   using: composite
   steps:
     - name: Install ingrain
       shell: bash
+      env:
+        INGRAIN_VERSION: ${{ inputs.version }}
       run: |
         case "$RUNNER_OS-$RUNNER_ARCH" in
           Linux-X64) target=x86_64-unknown-linux-gnu ;;
@@ -22,16 +24,55 @@ runs:
           Windows-ARM64) target=aarch64-pc-windows-msvc ;;
           *) echo "unsupported runner $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
         esac
-        base="https://github.com/WispAgents/ingrain/releases/download/${{ inputs.version }}/ingrain-${{ inputs.version }}-$target"
+        case "$INGRAIN_VERSION" in
+          v[0-9]*) ;;
+          *) echo "::error::version must be a release tag like v0.2.2, got '$INGRAIN_VERSION'"; exit 1 ;;
+        esac
+        if [ "$RUNNER_OS" = Windows ]; then ext=zip; else ext=tar.gz; fi
+        name="ingrain-$INGRAIN_VERSION-$target.$ext"
+        url="https://github.com/WispAgents/ingrain/releases/download/$INGRAIN_VERSION/$name"
         dir="$RUNNER_TEMP/ingrain"
         mkdir -p "$dir"
-        if [ "$RUNNER_OS" = Windows ]; then
-          curl -fsSL "$base.zip" -o "$dir/ingrain.zip"
-          pwsh -NoProfile -Command "Expand-Archive -Force -Path '$dir/ingrain.zip' -DestinationPath '$dir'"
+        curl -fsSL "$url" -o "$dir/$name"
+        curl -fsSL "$url.sha256" -o "$dir/$name.sha256"
+        if command -v sha256sum >/dev/null; then sum=sha256sum; else sum="shasum -a 256"; fi
+        (cd "$dir" && $sum -c "$name.sha256")
+        if [ "$ext" = zip ]; then
+          pwsh -NoProfile -Command "Expand-Archive -Force -Path '$dir/$name' -DestinationPath '$dir'"
         else
-          curl -fsSL "$base.tar.gz" | tar -xz -C "$dir"
+          tar -xzf "$dir/$name" -C "$dir"
         fi
         echo "$dir" >> "$GITHUB_PATH"
     - name: Check added lines
       shell: bash
-      run: ingrain check --diff "${{ inputs.base }}...HEAD" --format github
+      env:
+        INGRAIN_BASE: ${{ inputs.base }}
+        PUSH_BEFORE: ${{ github.event.before }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        # Outside pull requests there's no PR base. On a push, check what the push added; else
+        # (workflow_dispatch, a new branch) compare with the default branch.
+        if [ -z "$INGRAIN_BASE" ] && [ -n "$PUSH_BEFORE" ] \
+          && [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]; then
+          # A shallow checkout doesn't have it yet.
+          git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null \
+            || git fetch --no-tags --quiet --depth=1 origin "$PUSH_BEFORE" || true
+          if ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            echo "::error::commit $PUSH_BEFORE (before the push) not found; check out with fetch-depth: 0"
+            exit 1
+          fi
+          INGRAIN_BASE="$PUSH_BEFORE"
+        fi
+        if [ -z "$INGRAIN_BASE" ]; then
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            echo "::error::no base revision; set the action's 'base' input"
+            exit 1
+          fi
+          git fetch --no-tags --quiet origin "$DEFAULT_BRANCH" || true
+          INGRAIN_BASE="origin/$DEFAULT_BRANCH"
+        fi
+        if ! git rev-parse --verify --quiet "$INGRAIN_BASE^{commit}" >/dev/null; then
+          echo "::error::base revision '$INGRAIN_BASE' not found; check out with fetch-depth: 0"
+          exit 1
+        fi
+        ingrain check --diff "$INGRAIN_BASE...HEAD" --format github

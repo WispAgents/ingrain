@@ -137,7 +137,14 @@ pub fn extract(
             let Some(text) = texts.iter().find(|t| t.id == text_id) else {
                 continue;
             };
-            if e.decision.trim().is_empty() || seen.iter().any(|s| similar(s, &e.decision)) {
+            // A proposal that replaces a live decision restates it by design; never drop it.
+            let supersedes = e
+                .supersedes
+                .as_deref()
+                .is_some_and(|s| live_ids.contains(s));
+            if e.decision.trim().is_empty()
+                || (!supersedes && seen.iter().any(|s| similar(s, &e.decision)))
+            {
                 out.duplicates += 1;
                 continue;
             }
@@ -240,24 +247,85 @@ fn to_record(e: Extracted, text: &Text, live: &HashSet<&str>) -> Record {
     }
 }
 
-/// Same decision in other words: word-set overlap (Jaccard) of at least 0.6.
+/// Same decision in other words: word-set overlap (Jaccard) of at least 0.6, with the same
+/// polarity (a negated decision never duplicates a plain one) and the same numbers (`3.10` is
+/// not `3.12`).
 pub fn similar(a: &str, b: &str) -> bool {
-    let words = |s: &str| -> HashSet<String> {
-        s.to_lowercase()
-            .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .filter(|w| {
-                w.len() > 2 && !["the", "and", "for", "use", "not", "with", "instead"].contains(w)
-            })
-            .map(str::to_owned)
-            .collect()
-    };
-    let (wa, wb) = (words(a), words(b));
-    if wa.is_empty() || wb.is_empty() {
+    let (wa, wb) = (Words::of(a), Words::of(b));
+    if wa.negated != wb.negated || wa.numbers != wb.numbers {
         return false;
     }
-    let inter = wa.intersection(&wb).count() as f64;
-    let union = wa.union(&wb).count() as f64;
+    if wa.words.is_empty() || wb.words.is_empty() {
+        return false;
+    }
+    let inter = wa.words.intersection(&wb.words).count() as f64;
+    let union = wa.words.union(&wb.words).count() as f64;
     inter / union >= 0.6
+}
+
+/// The parts of a decision that `similar` compares.
+struct Words {
+    words: HashSet<String>,
+    numbers: HashSet<String>,
+    negated: bool,
+}
+
+impl Words {
+    fn of(s: &str) -> Self {
+        const STOP: &[&str] = &["the", "and", "for", "use", "with", "instead"];
+        const NEGATIONS: &[&str] = &[
+            "not",
+            "no",
+            "never",
+            "dont",
+            "doesnt",
+            "didnt",
+            "cant",
+            "cannot",
+            "wont",
+            "shouldnt",
+            "mustnt",
+            "isnt",
+            "arent",
+            "nor",
+            "avoid",
+            "without",
+            "forbid",
+            "forbidden",
+            "disallow",
+            "ban",
+            "banned",
+            "stop",
+        ];
+        let mut out = Words {
+            words: HashSet::new(),
+            numbers: HashSet::new(),
+            negated: false,
+        };
+        // `don't` → `dont`, so the apostrophe doesn't split it.
+        let lower = s.to_lowercase().replace(['\'', '\u{2019}'], "");
+        for raw in lower.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '.') {
+            let token = raw.trim_matches('.');
+            if token.is_empty() {
+                continue;
+            }
+            // Numbers and versions (`3`, `3.10`) are kept whole, whatever their length.
+            if token.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                out.numbers.insert(token.to_owned());
+                continue;
+            }
+            for w in token.split('.').filter(|w| !w.is_empty()) {
+                if NEGATIONS.contains(&w) {
+                    out.negated = true;
+                } else if w.chars().all(|c| c.is_ascii_digit()) {
+                    out.numbers.insert(w.to_owned());
+                } else if w.len() > 2 && !STOP.contains(&w) {
+                    out.words.insert(w.to_owned());
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Run `f` over `items` on up to `workers` threads, keeping order.
@@ -376,5 +444,42 @@ mod tests {
             "Use apiClient for HTTP calls",
             "Keep the cache on SQLite"
         ));
+    }
+
+    #[test]
+    fn opposite_polarity_and_other_versions_are_not_duplicates() {
+        assert!(!similar(
+            "Use SQLite for the cache",
+            "Do not use SQLite for the cache"
+        ));
+        assert!(!similar(
+            "Use SQLite for the cache",
+            "Don't use SQLite for the cache"
+        ));
+        assert!(!similar("Support Python 3.10", "Support Python 3.12"));
+        assert!(!similar(
+            "Run CI against Python 3.10 on every pull request build",
+            "Run CI against Python 3.12 on every pull request build"
+        ));
+        assert!(similar(
+            "Do not use axios for HTTP calls",
+            "Never use axios for any HTTP calls"
+        ));
+        assert!(similar("Support Python 3.12.", "Support Python 3.12"));
+    }
+
+    #[test]
+    fn a_superseding_proposal_is_never_a_duplicate() {
+        let reply = r#"{"results":[{"id":"pr1","records":[
+            {"decision":"Use SQLite for the whole cache","supersedes":"D-0001"}]}]}"#;
+        let known = vec![Record {
+            id: "D-0001".into(),
+            decision: "Use SQLite for the cache".into(),
+            status: Status::Accepted,
+            ..Default::default()
+        }];
+        let out = extract(&Fake(reply.into()), &[text("pr1")], &known, &[], 8, 1);
+        assert_eq!((out.proposals.len(), out.duplicates), (1, 0));
+        assert_eq!(out.proposals[0].supersedes.as_deref(), Some("D-0001"));
     }
 }

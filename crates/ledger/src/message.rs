@@ -62,7 +62,7 @@ pub fn violations(found: &[&Violation], records: &[Record], blocking_edit: bool)
     }
     s.push_str(
         "\nRewrite the code to follow the decision. If the code is right as written, keep it and add a comment \
-         `decisions-ignore <id>: <reason>` on that line.\n",
+         `decisions-ignore <id>: <reason>` on that line; the person is asked to approve it.\n",
     );
     s.push_str(HOW_TO_CHANGE);
     s

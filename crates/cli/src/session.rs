@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -15,6 +15,45 @@ pub struct Session {
     pub edited: BTreeSet<String>,
     #[serde(default)]
     pub stop_attempts: u32,
+    /// Changed files before each running Bash command, by tool use id: the PostToolUse hook
+    /// compares to find the files the command changed.
+    #[serde(default)]
+    pub bash: BTreeMap<String, BashSnapshot>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct BashSnapshot {
+    /// Seconds since the epoch; snapshots of commands that never finished are dropped later.
+    pub time: u64,
+    pub files: BTreeMap<String, String>,
+    /// The person was asked to approve this command (so it may change reviewed files).
+    #[serde(default)]
+    pub asked: bool,
+    /// `HEAD` before the command, to see commits it made or undid.
+    #[serde(default)]
+    pub head: Option<String>,
+}
+
+impl Session {
+    /// Fold in what parallel hooks recorded meanwhile. `consumed` is the Bash snapshot this
+    /// hook used up, which must not come back from disk.
+    pub fn merge(&mut self, on_disk: Session, consumed: Option<&str>) {
+        self.edited.extend(on_disk.edited);
+        for (id, snap) in on_disk.bash {
+            if Some(id.as_str()) != consumed {
+                self.bash.entry(id).or_insert(snap);
+            }
+        }
+        // A command whose PostToolUse never came (denied, interrupted) leaves its snapshot.
+        let hour_ago = now().saturating_sub(3600);
+        self.bash.retain(|_, s| s.time >= hour_ago);
+    }
+}
+
+pub fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 impl Session {

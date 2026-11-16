@@ -3,6 +3,7 @@
 //! before commit and in CI.
 
 mod agents_md;
+mod bash;
 mod check;
 mod cmd;
 mod hitlog;

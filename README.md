@@ -23,7 +23,7 @@ Nothing becomes a rule without a person accepting it.
 ```sh
 brew install wispagents/tap/ingrain   # macOS and Linux
 # or from source, any OS:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.2 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.3 ingrain
 ```
 
 Prebuilt binaries for macOS, Linux and Windows (x64 and arm64) are on the
@@ -94,11 +94,13 @@ Each is a no-op for teammates who don't have ingrain installed, and all of them 
 | Hook | What happens |
 |---|---|
 | `SessionStart` | Repo-wide decisions go into the session, plus how to propose a new one |
-| `PreToolUse` on Edit / Write / MultiEdit | The edit is simulated first. If an added line breaks a decision's check, the edit is **denied** with the decision and the way out. Otherwise the decisions scoped to that file are shown, each once per session |
-| `PostToolUse` on Edit / Write / MultiEdit | Learned rules run on the edited file. Warn: a note to the agent. Block: the agent must fix it, with the past human fix shown |
-| `Stop` | Rules and decisions are re-checked on the files this session edited. Something broken sends the turn back, up to `stop_max_attempts` times |
+| `PreToolUse` on Edit / Write / MultiEdit / NotebookEdit | The edit is simulated first. If an added line breaks a decision's check, the edit is **denied** with the decision and the way out. An edit that adds an `ingrain-ignore` / `decisions-ignore` comment asks the person first. Otherwise the decisions scoped to that file are shown, each once per session |
+| `PreToolUse` on Bash | A command that could write accepted decisions, rules or `.corrections/config.yml` (`sed -i`, `>`, `mv`, `rm`, …), or that accepts, rejects or retunes them (`ingrain rules mode`, `ingrain decisions accept`, …), or `git commit --no-verify`, asks the person first |
+| `PostToolUse` on Edit / Write / MultiEdit / NotebookEdit / Bash | Learned rules run on the edited file, or on the files the shell command changed (decisions too, since a command can't be simulated). Warn: a note to the agent. Block: the agent must fix it, with the past human fix shown |
+| `Stop` | Rules and decisions are re-checked on the files this session edited. Something broken sends the turn back, up to `stop_max_attempts` times; after that the turn ends and the person is told |
 
-Agents can't edit accepted decisions or rules; they propose with `ingrain decisions add --propose`
+Agents can't edit accepted decisions, rules or `.corrections/config.yml` (a broken config falls back
+to the defaults in hooks, so it can't switch them off); they propose with `ingrain decisions add --propose`
 or `ingrain decisions supersede`, and a person accepts.
 
 Tested live with Claude Code 2.1.322: asked to write raw `fetch` in `src/billing/`, the write was
@@ -115,8 +117,11 @@ existing code never blocks.
 | Pull request | `ingrain check --diff base...HEAD --format github` ([action](action/action.yml)) | annotations; failing check |
 | By hand | `ingrain check [paths]` | listed; exit 1 if something blocks |
 
-Pre-commit and CI judge a change by the decisions it started from, so a branch can't retire a
-decision and break it in the same diff. CI also flags any change to the ledger.
+Pre-commit and CI judge a change by the decisions, learned rules and config it started from, so a
+branch can't retire a decision, delete a rule, set it to shadow or ignore its path, and break it in
+the same diff. CI also flags any change to `decisions/` or `.corrections/`. Outside pull requests
+the Action compares with the default branch. The pre-commit hook goes where git runs hooks
+(`core.hooksPath`, or the main `.git/hooks` from a worktree).
 
 To keep a line on purpose, add a comment with a reason, on the line or the line above:
 
@@ -126,7 +131,9 @@ To keep a line on purpose, add a comment with a reason, on the line or the line 
 const res = await fetch(url);
 ```
 
-Without a reason it doesn't count. Overrides are logged; `ingrain rules promote` and
+Without a reason it doesn't count. On the line above, only a line that is just the comment counts.
+An agent adding one is asked to get the person's approval, and CI shows every override on added
+lines as a warning annotation. Overrides are logged; `ingrain rules promote` and
 `ingrain decisions stale` flag rules and decisions that are overridden often.
 
 ## Decisions
@@ -176,11 +183,18 @@ decisions ([docs/ledger-study](docs/ledger-study/report.md)).
 | Claude Code transcripts | The agent edits, you reply, the agent rewrites what it just wrote |
 
 `ingrain rules propose` clusters corrections by what they removed, writes rules (templates first, then a
-model), and keeps a rule only if it catches the past mistakes, spares the fixed versions, and is
-precise on agent code humans kept. One correction is enough to propose a rule; pass
+model), and keeps a rule only if it catches the past mistakes, spares the fixed versions, and
+isn't contradicted by agent code humans kept (the fix a rule came from never counts as its own
+evidence). One correction is enough to propose a rule, even with no other agent code to test on, so a first
+run has something to review. Each rule says whether it's from a single fix or repeated fixes.
+Single-fix rules that look like one-offs are held back and listed with the reason: the code is
+still used 5+ times today, the name is generic (`r3`, `data`, `.append(`), or every fix was in
+test code; `--all` keeps them. Pass
 `--min-corrections 3` (or set `min_support` in `.corrections/config.yml`) to wait for a mistake to
 repeat. Accepted rules start in shadow mode; `ingrain rules promote` moves them to warn and block
-from their hit log. `ingrain rules eval` measures the whole loop on your history.
+from their hit log. Shadow hits are invisible to the agent, so leaving shadow needs hits a human
+later corrected (at least 3, and half of all hits, per the mined corrections); `ingrain rules mode
+<id> warn` moves one by hand. `ingrain rules eval` measures the whole loop on your history.
 
 ## Commands
 
@@ -203,7 +217,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.2.2
+      - uses: WispAgents/ingrain/action@v0.2.3
 ```
 
 ## Layout

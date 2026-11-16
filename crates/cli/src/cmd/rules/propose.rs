@@ -27,6 +27,10 @@ pub struct Args {
     /// Print every cluster and how each candidate rule scored.
     #[arg(long)]
     explain: bool,
+    /// Also keep single-fix rules that look like one-offs (code still common today, or a
+    /// generic name).
+    #[arg(long)]
+    all: bool,
 }
 
 pub fn run(dir: &Path, args: Args) -> Outcome {
@@ -80,8 +84,20 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     if args.explain {
         print_explain(&stats.explain);
     }
+    let mut held = Vec::new();
+    let mut saved = 0;
     for mut p in proposals {
         let head_hits = head_hits(&repo, &p.compiled, &p.anchor.token)?;
+        let fixes = p.fix_events(&corrections);
+        if fixes <= 1
+            && !args.all
+            && let Some(why) =
+                propose::single_fix_concern(&p.anchor, head_hits, p.only_tests(&corrections))
+        {
+            held.push((p.rule.id.clone(), why));
+            continue;
+        }
+        saved += 1;
         if let Some(b) = p.rule.meta.backtest.as_mut() {
             b.head_hits = head_hits;
         }
@@ -93,8 +109,13 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
             .score
             .precision()
             .map_or("n/a".to_owned(), |v| format!("{:.0}%", v * 100.0));
+        let tier = if fixes <= 1 {
+            "single fix".to_owned()
+        } else {
+            format!("repeated ({fixes} fixes)")
+        };
         println!(
-            "  {:<32} catches {:>3} corrections · precision {:>4} · {} hits in current code · {}",
+            "  {:<32} {tier} · catches {} corrections · precision {:>4} · {} hits in current code · {}",
             p.rule.id,
             p.caught.len(),
             precision,
@@ -102,7 +123,19 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
             p.rule.meta.origin
         );
     }
-    println!("\nnext: `ingrain rules review`");
+    if !held.is_empty() {
+        println!(
+            "\nheld back {} single-fix rule{} that look like one-offs (`--all` keeps them):",
+            held.len(),
+            if held.len() == 1 { "" } else { "s" }
+        );
+        for (id, why) in &held {
+            println!("  {id:<32} {why}");
+        }
+    }
+    if saved > 0 {
+        println!("\nnext: `ingrain rules review`");
+    }
     Ok(ExitCode::SUCCESS)
 }
 
