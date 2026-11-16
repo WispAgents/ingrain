@@ -185,10 +185,14 @@ fn violation(r: &Record, t: &Target, lines: &[&str], line: u32, what: String) ->
     }
 }
 
-/// `decisions-ignore <id>: <reason>` on the line or the line above.
+/// `decisions-ignore <id>: <reason>` on the line, or on the line above when that line is only
+/// the comment (a trailing comment on the line above covers that line, not this one).
 fn ignore_reason(lines: &[&str], line: u32, id: &str) -> Option<String> {
     let idx = line as usize - 1;
-    for i in [idx.checked_sub(1), Some(idx)].into_iter().flatten() {
+    let above = idx
+        .checked_sub(1)
+        .filter(|&i| lines.get(i).is_some_and(|l| is_comment_only(l)));
+    for i in [above, Some(idx)].into_iter().flatten() {
         let Some(text) = lines.get(i) else { continue };
         for (pos, _) in text.match_indices("decisions-ignore") {
             let rest = text[pos + "decisions-ignore".len()..].trim_start();
@@ -215,6 +219,13 @@ fn ignore_reason(lines: &[&str], line: u32, id: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// A line holding nothing but a comment.
+fn is_comment_only(line: &str) -> bool {
+    const MARKERS: &[&str] = &["//", "#", "--", "/*", "<!--", ";", "{/*"];
+    let t = line.trim_start();
+    MARKERS.iter().any(|m| t.starts_with(m))
 }
 
 /// Dependencies the change adds to a manifest (empty for other files or unparsable ones).
@@ -505,5 +516,34 @@ mod tests {
             checker.check(&target("a.ts", without, None))[0].overridden,
             None
         );
+    }
+
+    #[test]
+    fn trailing_override_on_the_line_above_does_not_cover_a_new_line() {
+        let records = vec![rec(
+            Checks {
+                forbid_imports: vec!["axios".into()],
+                ..Default::default()
+            },
+            &[],
+        )];
+        let checker = Checker::new(&records);
+        let after = "import a from 'axios'; // decisions-ignore D-0007: legacy upload\nimport b from 'axios';\n";
+        let v = checker.check(&target("a.ts", after, Some(vec![LineRange::new(2, 2)])));
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].line, 2);
+        assert_eq!(v[0].overridden, None);
+        for comment in [
+            "# decisions-ignore D-0007: ok",
+            "  /* decisions-ignore D-0007: ok */",
+        ] {
+            let src = format!("{comment}\nimport b from 'axios';\n");
+            assert_eq!(
+                checker.check(&target("a.ts", &src, None))[0]
+                    .overridden
+                    .as_deref(),
+                Some("ok")
+            );
+        }
     }
 }
