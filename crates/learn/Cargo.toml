@@ -3,6 +3,8 @@ name = "ingrain-learn"
 description = "Capture corrections, cluster them, synthesize and backtest rules, evaluate"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 license.workspace = true
 
 [dependencies]

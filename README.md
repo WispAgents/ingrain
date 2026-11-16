@@ -1,5 +1,10 @@
 # ingrain
 
+[![ci](https://github.com/WispAgents/ingrain/actions/workflows/ci.yml/badge.svg)](https://github.com/WispAgents/ingrain/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/WispAgents/ingrain)](https://github.com/WispAgents/ingrain/releases/latest)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![msrv](https://img.shields.io/badge/rustc-1.90%2B-orange)](Cargo.toml)
+
 **Problem:** your coding agent keeps breaking what your team already settled. It re-adds the
 dependency you removed, brings back the pattern you banned, and repeats the mistake you corrected
 last week.
@@ -234,12 +239,17 @@ decisions/pending/         proposed decisions          gitignored
 ## Development
 
 ```sh
-cargo test --all
-cargo clippy --all-targets -- -D warnings
+cargo fmt --all --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --all --locked
 ```
 
 Crates: `core` (data model, rule files, git), `engine` (ast-grep), `learn` (capture, cluster, rule
 writing, backtest, eval), `ledger` (decisions, scope, checks, extraction), `cli` (the `ingrain`
 binary). [PLAN.md](PLAN.md) is the working plan.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR, [SECURITY.md](SECURITY.md) to report a
+vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release notes. This project follows a
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 License: Apache-2.0.

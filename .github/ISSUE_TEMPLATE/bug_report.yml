@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in ingrain doesn't work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, and the decision or rule files involved if relevant.
+      placeholder: |
+        1. ingrain init
+        2. ingrain decisions add ...
+        3. ingrain check --staged
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ingrain version
+      description: Output of `ingrain --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [macOS, Linux, Windows, Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where it happens
+      multiple: true
+      options:
+        - CLI
+        - Claude Code hooks / plugin
+        - Git pre-commit hook
+        - GitHub Action
+        - Agent skills
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output
+      description: Relevant output or logs. Remove anything private.
+      render: text

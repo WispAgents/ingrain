@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.png binary
+Cargo.lock linguist-generated=true
+docs/**/data/** linguist-generated=true
