@@ -72,6 +72,11 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         stats.llm_tried,
         stats.llm_errors
     );
+    if args.min_corrections.is_none() && min_support > 1 {
+        println!(
+            "(min_support {min_support} from .corrections/config.yml; pass --min-corrections 1 to propose rules from single fixes)"
+        );
+    }
     if args.explain {
         print_explain(&stats.explain);
     }

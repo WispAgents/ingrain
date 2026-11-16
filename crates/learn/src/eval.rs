@@ -12,6 +12,9 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::time::Instant;
 
+/// "Repeated" in the report: a correction in a cluster of at least this many fixes.
+pub const REPEATED: usize = 3;
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct EvalReport {
     pub corrections: usize,
@@ -93,8 +96,7 @@ pub fn evaluate(
     hunks: &[AgentHunk],
     opts: EvalOptions<'_>,
 ) -> Result<EvalReport> {
-    let min_support = opts.propose.min_support;
-    let stats = cluster::pattern_stats(corrections, min_support);
+    let stats = cluster::pattern_stats(corrections, REPEATED);
     let mut report = EvalReport {
         corrections: corrections.len(),
         agent_hunks: hunks.len(),

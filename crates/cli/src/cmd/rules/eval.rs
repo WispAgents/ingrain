@@ -65,7 +65,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         "patterns: {:.0}% removed a salient token · {:.0}% sit in a cluster of {}+ fixes",
         pct(report.with_anchor, report.corrections),
         pct(report.repeated, report.corrections),
-        min_support
+        ingrain_learn::eval::REPEATED
     );
     println!(
         "split: learn on {} corrections, test on {} (and {} agent hunks)",
