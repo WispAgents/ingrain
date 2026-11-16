@@ -1,0 +1,11 @@
+id: D-0007
+decision: Use `ast-grep-core`, `ast-grep-config` and `ast-grep-language` (0.51) as libraries for matching, and keep rule files valid ast-grep YAML with an `ingrain` block under `metadata`.
+scope:
+- crates/engine/**
+- crates/core/**
+- .corrections/rules/**
+category: architecture
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

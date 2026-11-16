@@ -72,7 +72,7 @@ pub fn needs_approval(command: &str) -> Option<String> {
     }
     // A command substitution inside quotes isn't split out; don't trust it near reviewed paths.
     let lower = command.to_lowercase();
-    let substitution = (command.contains("$(") || command.contains('`'))
+    let substitution = has_substitution(command)
         && (lower.contains("decisions") || lower.contains(".corrections"));
     let mut in_protected_dir = false;
     let mut mentions = false;
@@ -103,6 +103,44 @@ pub fn needs_approval(command: &str) -> Option<String> {
          `ingrain decisions supersede`."
             .to_owned()
     })
+}
+
+/// Whether `command` may run a command substitution (`$(…)` or backticks). Only one-line
+/// commands with plain quoting get the benefit of the doubt: there, a substitution inside
+/// single quotes is data, so markdown code in a decision text (`--decision 'use `x`'`) doesn't
+/// ask. ANSI-C quotes (`$'…'`), heredocs, `${…}` (nested quotes, `${x@P}`), comments and
+/// newlines change how quotes pair up, so with any of them every substitution counts.
+fn has_substitution(command: &str) -> bool {
+    if !command.contains("$(") && !command.contains('`') {
+        return false;
+    }
+    if ["$'", "<<", "${", "#", "\n", "\r"]
+        .iter()
+        .any(|p| command.contains(p))
+    {
+        return true;
+    }
+    let mut chars = command.chars().peekable();
+    let mut in_double = false;
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '\'' if !in_double => {
+                for q in chars.by_ref() {
+                    if q == '\'' {
+                        break;
+                    }
+                }
+            }
+            '"' => in_double = !in_double,
+            '`' => return true,
+            '$' if chars.peek() == Some(&'(') => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 /// A word that names `decisions/` or `.corrections/` outside their proposal folders.
@@ -596,6 +634,17 @@ mod tests {
             "true; > decisions/D-0001.yml",
             "echo \"$(rm decisions/D-0001.yml)\"",
             "cat <<'EOF' > decisions/D-0001.yml\nstatus: superseded\nEOF",
+            // Substitutions the shell runs: unquoted, or inside double quotes.
+            "cat `echo decisions/D-0001.yml`",
+            "echo \"`rm decisions/D-0001.yml`\"",
+            "echo 'x' \"$(rm decisions/D-0001.yml)\"",
+            "echo \"'$(rm decisions/D-0001.yml)'\"",
+            // From review: quoting the single-quote scan would pair up wrongly.
+            "echo $'\\'' $(rm decisions/D-0001.yml) #'",
+            "cat decisions/D-0001.yml - <<EOF\nit's $(rm decisions/D-0001.yml)\nEOF",
+            "cat decisions/D-0001.yml # it's\necho \"$(rm decisions/D-0001.yml)\"",
+            "echo \"${x-\"'\"}\" \"$(rm decisions/D-0001.yml)\" #'",
+            "x='$(rm decisions/D-0001.yml)'; cat decisions/D-0001.yml ${x@P}",
         ] {
             assert!(needs_approval(cmd).is_some(), "{cmd}");
         }
@@ -611,6 +660,9 @@ mod tests {
             "git log -p -- .corrections/rules/x.yml",
             "sed -n 1,5p decisions/D-0001.yml",
             "ingrain decisions add --propose \"x\" --reason y",
+            // Markdown code in single quotes is data, not a substitution.
+            "ingrain decisions supersede D-0002 --reason r --decision 'runs `ingrain check --diff`'",
+            "ingrain decisions add --propose 'call `$(x)` never' --reason 'see `decisions/`'",
             "ingrain decisions list",
             "ingrain rules promote",
             "ingrain check --staged",

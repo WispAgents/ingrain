@@ -1,0 +1,16 @@
+id: D-0024
+decision: Keep the default `min_support` for rule proposal at 1, and let `--min-corrections N` on `rules propose`/`rules eval` override `min_support` from `.corrections/config.yml`.
+reason: A user's first run should propose rules from single fixes. Backtest and human review still filter them.
+rejected:
+- 3-correction minimum default (gave 0 rules on datasette)
+scope:
+- crates/core/src/config.rs
+- crates/cli/src/cmd/rules/propose.rs
+- crates/cli/src/cmd/rules/eval.rs
+- crates/learn/src/propose.rs
+category: convention
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/commit/25e09af8f3eec6bd17c8e9de095e5fd53ddea801
+author: M0xoo
+date: 2026-11-16

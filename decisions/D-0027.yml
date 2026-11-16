@@ -1,0 +1,10 @@
+id: D-0027
+decision: Put skills in `skills/<name>/SKILL.md` folders that work unchanged for Claude Code and for `npx skills add WispAgents/ingrain` (Codex, Cursor and other agents).
+reason: One set of skill folders serves every agent.
+scope:
+- skills/**
+category: convention
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

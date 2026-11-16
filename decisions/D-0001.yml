@@ -1,0 +1,9 @@
+id: D-0001
+decision: Build Ingrain as a Rust workspace that produces a single binary named `ingrain`.
+scope:
+- '**'
+category: architecture
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

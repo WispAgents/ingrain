@@ -1,0 +1,14 @@
+id: D-0005
+decision: Never call a model from `ingrain check`.
+reason: check runs in pre-commit and CI; it must be fast, deterministic and work offline.
+scope:
+- crates/cli/src/check.rs
+- crates/ledger/src/check.rs
+category: constraint
+status: accepted
+checks:
+  forbid_imports:
+  - ingrain_learn::synth
+sources:
+- PLAN.md
+date: 2026-11-16

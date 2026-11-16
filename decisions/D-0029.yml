@@ -1,0 +1,11 @@
+id: D-0029
+decision: Pass GitHub Action inputs to scripts via `env:` and verify the release SHA-256 before use.
+reason: This avoids script injection and tampered release binaries.
+scope:
+- action/action.yml
+category: constraint
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/pull/8
+author: M0xoo
+date: 2026-11-16

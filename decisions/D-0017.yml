@@ -1,0 +1,10 @@
+id: D-0017
+decision: Support the rule modes `shadow`, `warn` and `block`, in that order, and always start new rules in `shadow`.
+scope:
+- crates/core/**
+- crates/cli/**
+category: convention
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

@@ -1,0 +1,10 @@
+id: D-0025
+decision: A single correction may still propose a rule, but without self-certification; hold back single-fix one-offs (pattern still common today, generic name, or test-only).
+reason: 'Cuts noise: on datasette, 33 candidates gave 7 proposed and 12 held back.'
+scope:
+- crates/learn/src/propose.rs
+category: constraint
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

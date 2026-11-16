@@ -1,0 +1,11 @@
+id: D-0012
+decision: Use `ingrain hook <session-start|pre-tool-use|post-tool-use|stop>` as the only hook entry point, and keep `check --hook` hidden with a deprecation note only for v0.1 settings.
+reason: Old v0.1 settings shouldn't break silently.
+scope:
+- crates/cli/**
+- hook
+category: api_change
+status: accepted
+sources:
+- PLAN.md
+date: 2026-11-16

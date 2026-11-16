@@ -1,0 +1,10 @@
+id: D-0030
+decision: When releasing, bump the version in Cargo.toml, .claude-plugin/plugin.json, Cargo.lock and the docs (README install tag, skills, action refs) together, merge the PR, tag, then update the Homebrew tap formula with the new sha256s.
+reason: A partial bump leaves install commands and the plugin pointing at different versions.
+scope:
+- Cargo.toml
+- .claude-plugin/**
+category: convention
+status: accepted
+author: M0xoo
+date: 2026-11-16

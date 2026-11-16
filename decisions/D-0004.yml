@@ -1,0 +1,27 @@
+id: D-0004
+decision: Access git by shelling out to `git`, and access GitHub by shelling out to `gh api`. Never read GitHub tokens directly.
+reason: '`gh api` uses the user''s existing login, so Ingrain never handles tokens.'
+rejected:
+- reading GitHub tokens directly
+- git2 / gix / octocrab crates
+scope:
+- crates/**
+category: constraint
+status: accepted
+checks:
+  forbid_deps:
+  - git2
+  - gix
+  - octocrab
+  forbid_patterns:
+  - language: Rust
+    pattern: env::var("GITHUB_TOKEN")
+  - language: Rust
+    pattern: std::env::var("GITHUB_TOKEN")
+  - language: Rust
+    pattern: env::var("GH_TOKEN")
+  - language: Rust
+    pattern: std::env::var("GH_TOKEN")
+sources:
+- PLAN.md
+date: 2026-11-16

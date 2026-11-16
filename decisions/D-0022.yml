@@ -1,0 +1,11 @@
+id: D-0022
+decision: Never count a fix's own hunks as evidence for the rule it proposes.
+reason: Self-evidence inflates rule support.
+scope:
+- crates/learn/**
+category: constraint
+status: accepted
+sources:
+- https://github.com/WispAgents/ingrain/pull/8
+author: M0xoo
+date: 2026-11-16
