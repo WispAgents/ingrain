@@ -15,8 +15,25 @@ mod session;
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
 
+/// For a coding agent asked to "use ingrain" or "set up ingrain", which may not have the skills.
+const AGENT_HELP: &str = "\
+Setting up a repo (for coding agents):
+  1. ingrain init --agents-md          hooks, pre-commit, and an AGENTS.md section for hookless agents
+  2. ingrain decisions extract --doc AGENTS.md --no-git --no-github --no-sessions
+                                       propose decisions from the rule docs (add --doc for each)
+  3. Add a `checks:` block (forbid_deps, forbid_imports, forbid_patterns) to each proposal in
+     decisions/pending/ that can be checked mechanically; without checks a decision never blocks
+  4. Show the user the proposals, then `ingrain decisions accept <P-ids>` for the ones they approve
+     and `ingrain decisions reject <P-id> --reason ...` for the rest
+  5. On GitHub, add .github/workflows/ingrain.yml using WispAgents/ingrain/action
+  6. Commit decisions/, .corrections/, .claude/settings.json and AGENTS.md on a branch
+Until that first commit, ingrain's hooks let the agent accept and commit, when each runs as its
+own command (no `cd`, variables or other programs in it); after it, agents only propose
+(`ingrain decisions add --propose`, `ingrain decisions supersede`) and a person accepts.
+Guide: https://github.com/WispAgents/ingrain/blob/main/skills/ingrain-setup/SKILL.md";
+
 #[derive(Parser)]
-#[command(name = "ingrain", version, about, long_about = None)]
+#[command(name = "ingrain", version, about, long_about = None, after_help = AGENT_HELP)]
 struct Cli {
     /// Repository to work on (defaults to the current directory).
     #[arg(long, global = true, value_name = "DIR")]

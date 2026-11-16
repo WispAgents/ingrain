@@ -106,7 +106,10 @@ Each is a no-op for teammates who don't have ingrain installed, and all of them 
 
 Agents can't edit accepted decisions, rules or `.corrections/config.yml` (a broken config falls back
 to the defaults in hooks, so it can't switch them off); they propose with `ingrain decisions add --propose`
-or `ingrain decisions supersede`, and a person accepts.
+or `ingrain decisions supersede`, and a person accepts. The one exception is first setup: until a
+commit on any branch holds a decision, rule or ingrain config, the agent setting ingrain up may accept
+proposals and commit them, so "set up ingrain in this repo" finishes in a headless session too. People
+review that commit like any other; `--no-verify` is still asked.
 
 Tested live with Claude Code 2.1.322: asked to write raw `fetch` in `src/billing/`, the write was
 denied before the file changed, and the agent explained the decision instead of working around it.

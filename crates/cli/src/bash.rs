@@ -56,6 +56,18 @@ const GIT_READ_ONLY: &[&str] = &[
     "cat-file",
     "add",
     "rev-parse",
+    // These move no files in the working tree.
+    "fetch",
+    "branch",
+    "remote",
+    "tag",
+    "rev-list",
+    "describe",
+    "shortlog",
+    "merge-base",
+    "name-rev",
+    "for-each-ref",
+    "reflog",
 ];
 
 /// Why the person should approve `command` before it runs, if they should.
@@ -69,6 +81,29 @@ pub fn needs_approval(command: &str) -> Option<String> {
         if let Some(why) = skips_hooks(seg) {
             return Some(why);
         }
+        if let Some(why) = hides_ledger_history(seg) {
+            return Some(why);
+        }
+    }
+    // `cd .git && rm -rf ingrain`: a write from inside the git directory.
+    let mut in_git_dir = false;
+    for seg in &segments {
+        let program = seg.words.first().map_or("", |w| base_name(w));
+        if matches!(program, "cd" | "pushd") {
+            in_git_dir = seg.words.get(1).is_some_and(|d| {
+                let d = d.replace('\\', "/");
+                let d = d.trim_start_matches("./");
+                d == ".git"
+                    || d.starts_with(".git/")
+                    || d.ends_with("/.git")
+                    || d.contains("/.git/")
+            });
+        } else if in_git_dir && !program.is_empty() && !reads_only(program, &seg.words) {
+            return hides_ledger_history(&Segment {
+                words: vec!["rm".into(), ".git".into()],
+                ..Segment::default()
+            });
+        }
     }
     // A command substitution inside quotes isn't split out; don't trust it near reviewed paths.
     let lower = command.to_lowercase();
@@ -80,7 +115,11 @@ pub fn needs_approval(command: &str) -> Option<String> {
     for seg in &segments {
         // A segment can be only a redirect (`> decisions/D-0001.yml`).
         let program = seg.words.first().map_or("", |w| base_name(w));
-        let skip = commit_message_values(&seg.words);
+        let mut skip = commit_message_values(&seg.words);
+        // `ingrain decisions …` names the subcommand, not the `decisions/` folder.
+        if program == "ingrain" {
+            skip.push(1 + global_options(&seg.words[1..]));
+        }
         let named = seg
             .words
             .iter()
@@ -143,6 +182,225 @@ fn has_substitution(command: &str) -> bool {
     false
 }
 
+/// `git` subcommands a setup commit needs.
+const GIT_SETUP: &[&str] = &[
+    "add",
+    "commit",
+    "status",
+    "log",
+    "diff",
+    "show",
+    "branch",
+    "checkout",
+    "switch",
+    "rev-parse",
+    "ls-files",
+    "push",
+    "remote",
+];
+
+/// Shell keywords the lexer drops before a command.
+const SHELL_KEYWORDS: &[&str] = &[
+    "if", "then", "else", "elif", "while", "until", "do", "!", "{",
+];
+
+/// `command` is one an agent setting ingrain up may run without asking, during first setup:
+/// only `ingrain` (on this repository: no `--repo`), the `git` subcommands a setup commit needs
+/// (no global options such as `-C`), read-only programs and `export`, with no `cd`, no variable
+/// or substitution outside commit messages, and output only to `/dev/null` or a relative path
+/// inside the repository. Anything else is asked as usual, so the exception can't reach
+/// another repository's ledger (a sibling, a nested clone, a symlink).
+pub fn setup_command(command: &str, root: &Path) -> bool {
+    // No expansion that could produce a path: `$?`, `$$`, `$#`, `$5` (prices in a reason) can't.
+    let plain = |w: &str| {
+        !w.contains('`')
+            && w.match_indices('$').all(|(i, _)| {
+                !w[i + 1..].chars().next().is_some_and(|c| {
+                    c.is_ascii_alphabetic()
+                        || matches!(
+                            c,
+                            '_' | '{' | '(' | '\'' | '"' | '@' | '*' | '\\' | '.' | '/' | '~'
+                        )
+                })
+            })
+    };
+    // Inside the repository: relative, without `..`, not absolute or on a drive.
+    let inside = |w: &str| {
+        plain(w) && !w.contains("..") && !w.contains(':') && !w.starts_with(['/', '~', '\\'])
+    };
+    // `NAME=value` (a prefix or `export`): git's own variables can point it at another
+    // repository or turn hooks off.
+    let assignment_ok = |w: &str| {
+        w.split_once('=')
+            .is_some_and(|(name, _)| !name.to_ascii_uppercase().starts_with("GIT_"))
+    };
+    let root_dir = std::fs::canonicalize(root).ok();
+    // Backticks in a single-quoted message are text.
+    let runs_substitution = has_substitution(command);
+    let segments = lex(command);
+    !segments.is_empty()
+        && segments.iter().all(|seg| {
+            let skip = commit_message_values(&seg.words);
+            // A substitution in a commit message runs too: it must be a setup command itself.
+            let messages_ok = !runs_substitution
+                || skip
+                    .iter()
+                    .filter_map(|i| seg.words.get(*i))
+                    .all(|m| !(m.contains("$(") || m.contains('`')) || setup_command(m, root));
+            let args: Vec<&String> = seg
+                .words
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !skip.contains(i))
+                .map(|(_, w)| w)
+                .collect();
+            let redirects_ok = seg.redirects.iter().all(|t| {
+                matches!(t.as_str(), "/dev/null" | "/dev/stdout" | "/dev/stderr") || inside(t)
+            });
+            // `xargs`, `sudo`, `env`, `exec` were dropped by the lexer; xargs adds arguments
+            // nobody can see here.
+            let env_ok = seg.env.iter().all(|w| {
+                if w.contains('=') {
+                    assignment_ok(w) && plain(w)
+                } else {
+                    matches!(w.as_str(), "time" | "command" | "nohup" | "$")
+                        || SHELL_KEYWORDS.contains(&w.as_str())
+                }
+            });
+            let program = seg.words.first().map_or("", |w| base_name(w));
+            let rest = &args[1.min(args.len())..];
+            let allowed = match program {
+                "" => true,
+                "ingrain" => !rest.iter().any(|w| w.starts_with("--repo")),
+                "git" => {
+                    // `--no-pager` is the only global option; no `-C`, `-c`, `--git-dir`.
+                    let words: Vec<&String> = rest
+                        .iter()
+                        .copied()
+                        .filter(|w| *w != "--no-pager")
+                        .collect();
+                    let sub = words.first().map(|w| w.as_str());
+                    let to_self = sub == Some("push")
+                        && words.iter().skip(1).any(|w| {
+                            *w == "."
+                                || w.starts_with(':')
+                                || w.starts_with("--delete")
+                                || *w == "-d"
+                                || w.starts_with("--mirror")
+                                || w.starts_with("--prune")
+                        });
+                    sub.is_some_and(|s| GIT_SETUP.contains(&s))
+                        && !to_self
+                        && words.iter().skip(1).all(|w| {
+                            !w.starts_with("--output")
+                                && (w.starts_with('-') || inside(w) || sub == Some("push"))
+                        })
+                }
+                "export" => rest.iter().all(|w| assignment_ok(w)),
+                // Only to the repository itself.
+                "cd" => match rest {
+                    [] => false,
+                    [dir] => {
+                        // Absolute: `/…`, or `C:/…` in Git Bash on Windows.
+                        let absolute = dir.starts_with('/')
+                            || dir.get(1..3) == Some(":/")
+                                && dir.starts_with(|c: char| c.is_ascii_alphabetic());
+                        *dir == "."
+                            || (absolute
+                                && root_dir.is_some()
+                                && std::fs::canonicalize(dir.as_str()).ok() == root_dir)
+                    }
+                    _ => false,
+                },
+                "pushd" | "popd" => false,
+                "mkdir" => rest.iter().all(|w| w.starts_with('-') || inside(w)),
+                "tee" => rest.iter().all(|w| {
+                    w.starts_with('-')
+                        || matches!(w.as_str(), "/dev/null" | "/dev/stdout" | "/dev/stderr")
+                }),
+                "sort" | "uniq" | "tr" | "column" => !rest
+                    .iter()
+                    .any(|w| w.starts_with("-o") || w.starts_with("--output")),
+                p => {
+                    SHELL_SYNTAX.contains(&p)
+                        || READ_ONLY.contains(&p) && !writes_with(p, &seg.words)
+                }
+            };
+            let words_ok = program == "export" || rest.iter().all(|w| plain(w));
+            allowed && words_ok && redirects_ok && env_ok && messages_ok
+        })
+}
+
+/// Commands that could hide that a ledger was ever committed, which would reopen first setup:
+/// removing ingrain's marker in `.git/ingrain/`, expiring or deleting reflogs, deleting refs
+/// with `update-ref -d`.
+fn hides_ledger_history(seg: &Segment) -> Option<String> {
+    let program = seg.words.first().map_or("", |w| base_name(w));
+    // Where git keeps what proves a ledger was committed: ingrain's marker, reflogs, refs.
+    let history = |w: &String| {
+        let w = w.replace('\\', "/").replace("/./", "/");
+        let w = w.strip_prefix("./").unwrap_or(&w);
+        [".git/ingrai", ".git/logs", ".git/refs", ".git/packed-refs"]
+            .iter()
+            .any(|p| w.starts_with(p) || w.contains(&format!("/{p}")))
+    };
+    let writes = !(READ_ONLY.contains(&program) && !writes_with(program, &seg.words));
+    let names = seg.words.iter().skip(1).any(history) && writes && program != "git";
+    // Redirects write whatever the program is.
+    let redirected = seg.redirects.iter().any(history);
+    // The repository's own git directory, removed or moved away.
+    let whole = matches!(program, "rm" | "mv" | "rmdir")
+        && seg
+            .words
+            .iter()
+            .skip(1)
+            .any(|w| matches!(w.trim_end_matches('/'), ".git" | "./.git"));
+    let git = program == "git" && {
+        let (sub, rest) = git_subcommand(&seg.words);
+        let globals = &seg.words[1..seg.words.len() - rest.len()];
+        match sub {
+            Some("reflog") => rest
+                .first()
+                .is_some_and(|w| matches!(w.as_str(), "expire" | "delete")),
+            Some("update-ref") => rest.iter().any(|w| {
+                w == "-d" || w == "--stdin" || (w.len() >= 40 && w.chars().all(|c| c == '0'))
+            }),
+            Some("gc") => {
+                rest.iter().any(|w| w.starts_with("--prune"))
+                    || globals
+                        .iter()
+                        .any(|w| w.to_ascii_lowercase().contains("expire"))
+            }
+            Some("prune") => true,
+            // Pushing to the repository itself can delete or rewind its refs.
+            Some("push") => {
+                rest.iter().any(|w| w == ".")
+                    && rest.iter().any(|w| {
+                        w.starts_with(':')
+                            || w.starts_with('+')
+                            || w == "-d"
+                            || w == "-f"
+                            || w.starts_with("--delete")
+                            || w.starts_with("--force")
+                            || w.starts_with("--mirror")
+                            || w.starts_with("--prune")
+                    })
+            }
+            _ => false,
+        }
+    };
+    (names || redirected || whole || git).then(|| {
+        "This could hide that the decisions were committed (ingrain's marker in .git, reflogs, \
+         refs), which would let agents accept decisions without asking."
+            .to_owned()
+    })
+}
+
+/// Why `command` skips ingrain's pre-commit check, if it does. Asked even during first setup.
+pub fn skips_verification(command: &str) -> Option<String> {
+    lex(command).iter().find_map(skips_hooks)
+}
+
 /// A word that names `decisions/` or `.corrections/` outside their proposal folders.
 fn is_protected(word: &str) -> bool {
     let w = word.to_lowercase().replace('\\', "/");
@@ -157,7 +415,14 @@ fn is_protected(word: &str) -> bool {
     w.trim_end_matches('/').rsplit('/').next() == Some("decisions")
 }
 
+/// Shell syntax that starts a segment but runs no program: `for x in a b`, `case`, `done`, `fi`
+/// (substitutions in them are their own segments).
+const SHELL_SYNTAX: &[&str] = &["for", "case", "select", "done", "fi", "esac", "}", "in"];
+
 fn reads_only(program: &str, words: &[String]) -> bool {
+    if SHELL_SYNTAX.contains(&program) {
+        return true;
+    }
     if program == "git" {
         let (sub, rest) = git_subcommand(words);
         return sub.is_some_and(|s| GIT_READ_ONLY.contains(&s))
@@ -178,13 +443,25 @@ fn skips_hooks(seg: &Segment) -> Option<String> {
     if !words.first().is_some_and(|w| base_name(w) == "git") {
         return None;
     }
-    let config_hooks = words
-        .iter()
-        .chain(&seg.env)
-        .any(|w| w.to_lowercase().contains("hookspath"))
-        || seg.env.iter().any(|w| w.starts_with("GIT_CONFIG_"))
-        || words.iter().any(|w| w.starts_with("--config-env"));
     let (sub, rest) = git_subcommand(words);
+    // `git config core.hooksPath`, `--get`, `--list`: reading it skips nothing.
+    let reads_config = sub == Some("config")
+        && words[1..words.len() - rest.len()]
+            .iter()
+            .all(|w| !w.to_lowercase().contains("hookspath"))
+        && (rest.iter().any(|w| {
+            matches!(
+                w.as_str(),
+                "--get" | "--get-all" | "--get-regexp" | "-l" | "--list" | "--show-origin"
+            )
+        }) || rest.iter().filter(|w| !w.starts_with('-')).count() == 1);
+    let config_hooks = !reads_config
+        && (words
+            .iter()
+            .chain(&seg.env)
+            .any(|w| w.to_lowercase().contains("hookspath"))
+            || seg.env.iter().any(|w| w.starts_with("GIT_CONFIG_"))
+            || words.iter().any(|w| w.starts_with("--config-env")));
     let values = commit_values(rest);
     let no_verify = sub == Some("commit")
         && rest.iter().enumerate().any(|(i, w)| {
@@ -294,11 +571,36 @@ fn commit_message_values(words: &[String]) -> Vec<usize> {
     out
 }
 
+/// How many words of ingrain's global options (`--repo DIR`) come before the subcommand.
+fn global_options<S: AsRef<str>>(args: &[S]) -> usize {
+    let mut i = 0;
+    while let Some(w) = args.get(i).map(AsRef::as_ref) {
+        match w {
+            "--repo" => i += 2,
+            w if w.starts_with("--repo=") => i += 1,
+            _ => break,
+        }
+    }
+    i.min(args.len())
+}
+
 /// `ingrain` subcommands that accept, reject or retune what people review.
 fn ledger_command(words: &[&str]) -> Option<String> {
     let at = words.iter().position(|w| base_name(w) == "ingrain")?;
-    let rest = &words[at + 1..];
+    // `--repo` is global: it may come before or after the subcommand.
+    let mut rest: Vec<&str> = Vec::new();
+    let mut args = words[at + 1..].iter();
+    while let Some(w) = args.next() {
+        if *w == "--repo" {
+            args.next();
+        } else if !w.starts_with("--repo=") {
+            rest.push(w);
+        }
+    }
     let (group, sub) = (rest.first().copied()?, rest.get(1).copied().unwrap_or(""));
+    if rest.iter().any(|w| matches!(*w, "--help" | "-h")) {
+        return None;
+    }
     let mutating = match group {
         "decisions" => match sub {
             "accept" | "reject" | "review" => true,
@@ -380,6 +682,11 @@ fn lex(command: &str) -> Vec<Segment> {
                         _ => word.push(q),
                     }
                 }
+            }
+            // A line continuation joins lines; it isn't part of a word.
+            '\\' if chars.peek() == Some(&'\n') => {
+                chars.next();
+                finish_word(&mut segments, &mut word, &mut has_word, &mut redirect_next);
             }
             '\\' => {
                 has_word = true;
@@ -493,7 +800,24 @@ fn lex(command: &str) -> Vec<Segment> {
                 (w.contains('=') && !w.starts_with('-'))
                     || matches!(
                         w.as_str(),
-                        "sudo" | "env" | "command" | "exec" | "xargs" | "time" | "nohup" | "$"
+                        "sudo"
+                            | "env"
+                            | "command"
+                            | "exec"
+                            | "xargs"
+                            | "time"
+                            | "nohup"
+                            | "$"
+                            // Shell keywords before a command.
+                            | "if"
+                            | "then"
+                            | "else"
+                            | "elif"
+                            | "while"
+                            | "until"
+                            | "do"
+                            | "!"
+                            | "{"
                     )
             })
             .count();
@@ -505,7 +829,10 @@ fn lex(command: &str) -> Vec<Segment> {
 
 fn base_name(word: &str) -> &str {
     let base = word.rsplit(['/', '\\']).next().unwrap_or(word);
-    base.strip_suffix(".exe").unwrap_or(base)
+    match base.len().checked_sub(4) {
+        Some(i) if base.is_char_boundary(i) && base[i..].eq_ignore_ascii_case(".exe") => &base[..i],
+        _ => base,
+    }
 }
 
 /// Changed and untracked files, with a cheap stamp (size and modification time) each, so the
@@ -530,9 +857,239 @@ pub fn snapshot(git: &Git) -> BTreeMap<String, String> {
                 files.insert(old.to_owned(), "deleted".to_owned());
             }
         }
-        files.insert(path.to_owned(), stamp(&git.root().join(path)));
+        files.insert(path.to_owned(), stamp_of(git, path));
     }
     files
+}
+
+/// The stamp `snapshot` records for a repo-relative path. Reviewed files also get a hash of
+/// their content, so an edit that keeps size and modification time (`touch -r`) still shows.
+pub fn stamp_of(git: &Git, rel: &str) -> String {
+    let path = git.root().join(rel);
+    let stamp = stamp(&path);
+    if !is_reviewed_file(rel) {
+        return stamp;
+    }
+    match std::fs::read(&path) {
+        Ok(bytes) => format!("{stamp}:{:016x}", content_hash(&bytes)),
+        Err(_) => stamp,
+    }
+}
+
+/// `stamp` (from `stamp_of`) was taken of a file with this content.
+pub fn stamp_holds(stamp: &str, content: &[u8]) -> bool {
+    stamp
+        .rsplit_once(':')
+        .is_some_and(|(_, hash)| hash == format!("{:016x}", content_hash(content)))
+}
+
+/// Reviewed files in the index and their blob ids.
+pub fn staged_reviewed(git: &Git) -> BTreeMap<String, String> {
+    let Some(out) = git.try_run(&["ls-files", "-s", "-z", "--", "decisions", ".corrections"])
+    else {
+        return BTreeMap::new();
+    };
+    out.split('\0')
+        .filter_map(|entry| {
+            // `<mode> <blob> <stage>\t<path>`
+            let (meta, path) = entry.split_once('\t')?;
+            let blob = meta.split(' ').nth(1)?;
+            is_reviewed_file(path).then(|| (path.to_owned(), blob.to_owned()))
+        })
+        .collect()
+}
+
+/// What every ref points at, as `<commit> <refname>` lines (annotated tags peeled), and the
+/// stash.
+pub fn tips(git: &Git) -> (Vec<String>, Option<String>) {
+    let tips = tips_of(git, &[]);
+    let stash = tips
+        .iter()
+        .find_map(|l| l.strip_suffix(" refs/stash").map(str::to_owned));
+    (tips, stash)
+}
+
+fn tips_from(out: &str) -> Vec<String> {
+    out.lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split(' ').filter(|p| !p.is_empty()).collect();
+            match parts.as_slice() {
+                [_, peeled, name] => Some(format!("{peeled} {name}")),
+                [sha, name] => Some(format!("{sha} {name}")),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// `tips` lines as refname to commit.
+pub fn parse_tips(lines: &[String]) -> BTreeMap<String, String> {
+    lines
+        .iter()
+        .filter_map(|l| l.split_once(' '))
+        .map(|(sha, name)| (name.to_owned(), sha.to_owned()))
+        .collect()
+}
+
+/// The ref's newest reflog entry says a fetch wrote it. A pull's fetch counts for
+/// remote-tracking refs (`pull_too`), not for the branch the pull merged into. Read from the
+/// reflog file: a fetch can update thousands of refs, too many to ask git one by one.
+pub fn fetched(git: &Git, name: &str, pull_too: bool) -> bool {
+    let dir = common_dir(git);
+    let subject = match &dir {
+        // Reftable repos (git 2.45+) keep reflogs inside the ref store: ask git.
+        Some(dir) if !dir.join("logs").is_dir() => git
+            .try_run(&["reflog", "show", "-1", "--format=%gs", name, "--"])
+            .map(|s| s.trim().to_owned()),
+        dir => dir
+            .as_ref()
+            .and_then(|dir| std::fs::read_to_string(dir.join("logs").join(name)).ok())
+            .and_then(|log| {
+                let last = log.lines().rev().find(|l| !l.trim().is_empty())?.to_owned();
+                last.split_once('\t').map(|(_, subject)| subject.to_owned())
+            }),
+    };
+    subject.is_some_and(|m| {
+        let m = m.trim_start();
+        m.starts_with("fetch") || (pull_too && m.starts_with("pull"))
+    })
+}
+
+/// The git directory shared by all worktrees.
+pub fn common_dir(git: &Git) -> Option<std::path::PathBuf> {
+    git.try_run(&["rev-parse", "--git-common-dir"])
+        .map(|d| git.root().join(d.trim()))
+}
+
+/// The commits of a merge, cherry-pick or rebase in progress, and ORIG_HEAD, as
+/// `<NAME> <commit>`: read from their files in the git directory, no git call.
+pub fn pending_heads(git: &Git) -> Vec<String> {
+    ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REBASE_HEAD", "ORIG_HEAD"]
+        .iter()
+        .filter_map(|name| {
+            let text = std::fs::read_to_string(git.git_dir().join(name)).ok()?;
+            let sha = text.lines().next()?.trim().to_owned();
+            (sha.len() >= 40 && sha.chars().all(|c| c.is_ascii_hexdigit()))
+                .then(|| format!("{name} {sha}"))
+        })
+        .collect()
+}
+
+/// A local branch or the stash points elsewhere than before the command.
+pub fn heads_or_stash_moved(git: &Git, before: &crate::session::BashSnapshot) -> bool {
+    let Some(tips) = &before.tips else {
+        return false;
+    };
+    let pick = |lines: &[String]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| {
+                l.split_once(' ')
+                    .is_some_and(|(_, n)| n.starts_with("refs/heads/") || n == "refs/stash")
+            })
+            .cloned()
+            .collect()
+    };
+    pick(tips) != pick(&tips_of(git, &["refs/heads", "refs/stash"]))
+}
+
+fn tips_of(git: &Git, patterns: &[&str]) -> Vec<String> {
+    let mut args = vec![
+        "for-each-ref",
+        "--format=%(objectname) %(*objectname) %(refname)",
+    ];
+    args.extend(patterns);
+    tips_from(&git.try_run(&args).unwrap_or_default())
+}
+
+/// The commit was made at or after `time` (seconds since the epoch): this command made it.
+pub fn created_since(git: &Git, commit: &str, time: u64) -> bool {
+    git.try_run(&["show", "-s", "--format=%ct", commit])
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .is_some_and(|t| t >= time)
+}
+
+/// The branch `HEAD` is on, if any.
+pub fn branch(git: &Git) -> Option<String> {
+    git.try_run(&["symbolic-ref", "-q", "HEAD"])
+        .map(|s| s.trim().to_owned())
+}
+
+/// The blob of `path` in `commit`, `None` if it isn't there.
+pub fn blob_at(git: &Git, commit: &str, path: &str) -> Option<String> {
+    git.try_run(&["rev-parse", "--verify", "-q", &format!("{commit}:{path}")])
+        .map(|s| s.trim().to_owned())
+}
+
+/// The blob `path` on disk would be (`git hash-object`, with the repo's filters).
+pub fn blob_on_disk(git: &Git, path: &str) -> Option<String> {
+    git.root().join(path).is_file().then(|| {
+        git.try_run(&["hash-object", "--", path])
+            .map(|s| s.trim().to_owned())
+    })?
+}
+
+/// Commits reachable from `from` but not from any of `not` (at most `limit`). `not` goes on
+/// stdin: a repo can have thousands of refs, more than a command line holds on Windows.
+pub fn new_commits(git: &Git, from: &str, not: &[&str], limit: usize) -> Option<Vec<String>> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("git")
+        .args(["rev-list", &format!("--max-count={limit}"), from, "--stdin"])
+        .current_dir(git.root())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdin = child.stdin.take()?;
+    // `^<commit>` excludes it; a `--not` on the command line doesn't reach stdin.
+    let input: String = not.iter().map(|c| format!("^{c}\n")).collect();
+    // Written from another thread so a full stdout pipe can't deadlock us.
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let out = child.wait_with_output().ok()?;
+    let _ = writer.join();
+    out.status.success().then(|| {
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
+/// A pseudo-ref (`MERGE_HEAD`) as a commit.
+pub fn head_named(git: &Git, name: &str) -> Option<String> {
+    git.try_run(&["rev-parse", "--verify", "-q", &format!("{name}^{{commit}}")])
+        .map(|s| s.trim().to_owned())
+}
+
+/// Files in the index.
+pub fn tracked(git: &Git) -> Vec<String> {
+    git.try_run(&["ls-files", "-z"])
+        .map(|out| {
+            out.split('\0')
+                .filter(|p| !p.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A content hash that is stable across runs (`DefaultHasher` uses fixed keys). Line endings
+/// are folded, so a checkout with `core.autocrlf` matches its commit.
+pub fn content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !(bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n')) {
+            h.write_u8(bytes[i]);
+        }
+        i += 1;
+    }
+    h.finish()
 }
 
 fn stamp(path: &Path) -> String {
@@ -625,6 +1182,8 @@ mod tests {
             "git commit -n -m x",
             "git commit -anm x",
             "git -c core.hooksPath=/dev/null commit -m x",
+            "git config core.hooksPath /dev/null",
+            "git config --local core.hooksPath x",
             "ls decisions | xargs rm",
             // Second review.
             "git commit --no-veri -m x",
@@ -645,6 +1204,26 @@ mod tests {
             "cat decisions/D-0001.yml # it's\necho \"$(rm decisions/D-0001.yml)\"",
             "echo \"${x-\"'\"}\" \"$(rm decisions/D-0001.yml)\" #'",
             "x='$(rm decisions/D-0001.yml)'; cat decisions/D-0001.yml ${x@P}",
+            "ingrain decisions list; rm -rf decisions",
+            "for f in decisions/*.yml; do rm $f; done",
+            "if true; then rm decisions/D-0001.yml; fi",
+            "cat x \\\n> decisions/D-0001.yml",
+            "ingrain --repo . decisions accept P-1",
+            "ingrain --repo=. rules mode x block",
+            "ingrain decisions --repo ../other accept P-1",
+            "ingrain rules mode --repo=. x block",
+            "rm -rf .git/ingrain",
+            "rm -rf .git/ingrai* .git/logs",
+            "rm -rf .git/./ingrain",
+            "cd .git && rm -rf ingrain",
+            "mv .git x && git init",
+            "git -c gc.reflogExpire=now gc",
+            "git push -q . :main",
+            "git update-ref refs/heads/main 0000000000000000000000000000000000000000",
+            "echo x > .git/logs/HEAD",
+            "rm -rf ./.git",
+            "git reflog expire --expire=now --all",
+            "git update-ref -d refs/remotes/origin/main",
         ] {
             assert!(needs_approval(cmd).is_some(), "{cmd}");
         }
@@ -687,8 +1266,98 @@ mod tests {
             "git commit -uno -m x",
             "cat > /tmp/notes <<'EOF'\nsee decisions/D-0001.yml and rm it\nEOF",
             "cat decisions/D-0001.yml 2>/dev/null",
+            // Read-only ingrain subcommands next to other commands.
+            "ingrain decisions for src/a.ts; git branch --show-current",
+            "ingrain decisions list --all && npm test",
+            "ingrain rules list; git stash list",
+            "ingrain --repo . decisions for src/a.ts; git branch",
+            "git status; git branch -vv; git remote -v; git diff decisions/D-0003.yml; git fetch origin",
+            "git config core.hooksPath; git config --get core.hooksPath || echo none",
+            "ingrain decisions accept --help; ingrain rules mode -h",
+            "ingrain decisions add --propose x 2>&1; \\\ningrain decisions add --propose y",
+            "ls -R decisions; for f in decisions/pending/*; do echo \"== $f\"; cat \"$f\"; done",
+            "if git diff --quiet decisions/; then echo same; fi",
+            "ls .git/ingrain/sessions",
+            "rm -f .git/index.lock && git commit -m x",
+            "chmod +x .git/hooks/pre-commit",
+            "tar --exclude .git -czf /tmp/x.tgz .",
+            "rm -rf vendor/lib/.git",
+            "du -sh .git",
+            "git gc",
+            "git update-ref refs/heads/tmp HEAD",
+            "git push . HEAD:main",
+            "echo '*.log' >> .git/info/exclude",
+            "git reflog -5",
         ] {
             assert!(needs_approval(cmd).is_none(), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn setup_commands() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // As Git Bash on Windows writes it: forward slashes.
+        let cd_root = format!(
+            "cd {} && ingrain decisions accept P-1",
+            root.display().to_string().replace('\\', "/")
+        );
+        for cmd in [
+            cd_root.as_str(),
+            "git add decisions/ && git commit -m 'Set up ingrain' && git push -u origin ingrain-setup",
+            "ingrain decisions list | sort | tee /dev/stderr",
+            "mkdir -p .github/workflows && ingrain decisions accept P-1",
+            "git --no-pager log --oneline -3; ingrain decisions accept P-1",
+            "ingrain decisions accept P-1 && git add decisions && git commit -m 'Set up `ingrain`'",
+            "ingrain decisions accept P-1 P-2",
+            "/Users/me/.cargo/bin/ingrain decisions accept P-1 2>/dev/null",
+            "ingrain decisions accept P-1 > /dev/null 2>&1",
+            "export PATH=/tmp/bin:$PATH && ingrain decisions accept P-1",
+            "ingrain decisions list --all; ingrain decisions accept P-1 2>&1 | tail -5",
+            "git add decisions .corrections .claude/settings.json && git commit -qm 'set up ingrain...'",
+            "git checkout -b ingrain-setup && git add -A && git commit -m x",
+            "git commit -m \"$(cat <<'EOF'\nset up ingrain: see ../docs, $HOME and /etc\nEOF\n)\"",
+            "git commit -q -F - <<'EOF'\nSet up ingrain\nEOF",
+            "cat decisions/pending/P-1.yml; ingrain decisions reject P-3 --reason 'too vague'",
+            "ingrain decisions list > notes.txt",
+            "ingrain decisions accept P-1 && ingrain check; echo exit=$?",
+            "ingrain decisions reject P-2 --reason 'costs $5 a month'",
+        ] {
+            assert!(setup_command(cmd, root), "{cmd}");
+        }
+        for cmd in [
+            "sed -i s/a/b/ ../other/decisions/D-0001.yml",
+            "ingrain --repo ../other decisions accept P-1",
+            "ingrain decisions accept P-1 --repo=/x",
+            "cd vendor/lib && ingrain decisions accept P-1",
+            "cd && ingrain decisions accept P-1",
+            "rm blink/decisions/D-0001.yml",
+            "ingrain --repo \"$(echo /x)\" decisions accept P-1",
+            "ingrain decisions accept $P",
+            "ingrain decisions accept ${P}",
+            "cat $'\\x2e\\x2e/x'",
+            "git -C vendor/lib commit -m x",
+            "git -c core.hooksPath=/dev/null commit -m x",
+            "git reset --hard HEAD~1",
+            "ingrain decisions accept P-1 > ../x/decisions/D-0001.yml",
+            "ingrain decisions accept P-1 | tee /tmp/log",
+            "python3 -c 'open(\"decisions/D-0001.yml\",\"w\")'",
+            // From review: arguments and environment nobody sees here.
+            "echo --repo ../other | xargs ingrain decisions accept P-1",
+            "export GIT_DIR=../other/.git GIT_WORK_TREE=../other; ingrain decisions accept P-1",
+            "GIT_DIR=../o/.git git commit -m x",
+            "export GIT_CONFIG_COUNT=1; git commit -m x",
+            "ingrain decisions accept P-1; git diff --output=../o/decisions/D-0001.yml",
+            "git push . :main",
+            "git push origin --delete main",
+            "git commit -m \"$(ingrain --repo ../o decisions accept P-1)\"",
+            "git commit -m \"$(rm decisions/D-0001.yml)\"",
+            "cd /tmp && ingrain decisions accept P-1",
+            "pushd ../o && ingrain decisions accept P-1",
+            "ingrain decisions list | tee ../x",
+            "sort -o decisions/D-0001.yml x",
+        ] {
+            assert!(!setup_command(cmd, root), "{cmd}");
         }
     }
 

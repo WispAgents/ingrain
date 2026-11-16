@@ -15,6 +15,9 @@ pub struct Session {
     pub edited: BTreeSet<String>,
     #[serde(default)]
     pub stop_attempts: u32,
+    /// Stashes agent commands filled with edits that weren't the person's: not history.
+    #[serde(default)]
+    pub tainted_stashes: BTreeSet<String>,
     /// Changed files before each running Bash command, by tool use id: the PostToolUse hook
     /// compares to find the files the command changed.
     #[serde(default)]
@@ -32,6 +35,21 @@ pub struct BashSnapshot {
     /// `HEAD` before the command, to see commits it made or undid.
     #[serde(default)]
     pub head: Option<String>,
+    /// Staged blob of each reviewed file in the index before the command. `None` in a snapshot
+    /// from an older ingrain, whose stamps can't be compared either.
+    #[serde(default)]
+    pub staged: Option<BTreeMap<String, String>>,
+    /// Commits every ref pointed at before the command, and the branch `HEAD` was on: to tell
+    /// a move through existing history (checkout, merge, rebase, pull) from new content.
+    #[serde(default)]
+    pub tips: Option<Vec<String>>,
+    #[serde(default)]
+    pub stash: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// MERGE_HEAD, CHERRY_PICK_HEAD, REBASE_HEAD and ORIG_HEAD before the command.
+    #[serde(default)]
+    pub pending: Vec<String>,
 }
 
 impl Session {
@@ -39,6 +57,7 @@ impl Session {
     /// hook used up, which must not come back from disk.
     pub fn merge(&mut self, on_disk: Session, consumed: Option<&str>) {
         self.edited.extend(on_disk.edited);
+        self.tainted_stashes.extend(on_disk.tainted_stashes);
         for (id, snap) in on_disk.bash {
             if Some(id.as_str()) != consumed {
                 self.bash.entry(id).or_insert(snap);
