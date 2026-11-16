@@ -1579,3 +1579,123 @@ fn history_rule_edges_2() {
         git(dir, &["branch", "-f", "main", "HEAD~4"]);
     });
 }
+
+/// From the third review of the history rule: ordinary flows that must not block.
+#[test]
+fn history_rule_edges_3() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    let path = dir.join("decisions/D-0001.yml");
+    let record = std::fs::read_to_string(&path).unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    let bare = remote.path().join("r.git");
+    git(remote.path(), &["init", "-q", "--bare", "r.git"]);
+    git(dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(dir, &["push", "-q", "-u", "origin", "main"]);
+
+    let n = std::cell::Cell::new(0);
+    let run_hooked = |command: &str, steps: &dyn Fn()| -> Option<Value> {
+        n.set(n.get() + 1);
+        let payload = json!({"session_id": "g", "cwd": dir, "tool_name": "Bash",
+            "tool_use_id": format!("g{}", n.get()), "tool_input": {"command": command}});
+        hook(dir, "pre-tool-use", payload.clone());
+        steps();
+        hook(dir, "post-tool-use", payload)
+    };
+    let fine = |command: &str, steps: &dyn Fn()| {
+        let after = run_hooked(command, steps);
+        assert!(after.is_none(), "{command}: {after:?}");
+    };
+    let fails = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{args:?} should stop");
+    };
+
+    // The person's PR with a decision change, squash-merged upstream; their branch is rebased.
+    git(dir, &["checkout", "-qb", "feature"]);
+    std::fs::write(&path, record.replace("in src", "in the app")).unwrap();
+    git(dir, &["commit", "-qam", "decision", "--no-verify"]);
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 3;\n").unwrap();
+    git(dir, &["commit", "-qam", "code", "--no-verify"]);
+    git(dir, &["checkout", "-q", "main"]);
+    git(dir, &["merge", "-q", "--squash", "feature"]);
+    git(dir, &["commit", "-qm", "squashed PR", "--no-verify"]);
+    git(dir, &["push", "-q", "origin", "main"]);
+    git(dir, &["checkout", "-q", "feature"]);
+    fine("git rebase origin/main", &|| {
+        git(dir, &["rebase", "-q", "origin/main"])
+    });
+    git(dir, &["checkout", "-q", "main"]);
+
+    // The person's stash from before the session survives the agent's own stash and pop.
+    std::fs::write(
+        &path,
+        format!(
+            "{}# the person's edit\n",
+            std::fs::read_to_string(&path).unwrap()
+        ),
+    )
+    .unwrap();
+    git(dir, &["stash", "-q"]);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 4;\n").unwrap();
+    fine("git stash", &|| git(dir, &["stash", "-q"]));
+    fine("git stash pop", &|| git(dir, &["stash", "pop", "-q"]));
+    git(dir, &["checkout", "-q", "--", "src/ui.ts"]);
+    fine("git stash pop", &|| git(dir, &["stash", "pop", "-q"]));
+    git(dir, &["checkout", "-q", "--", "decisions/D-0001.yml"]);
+
+    // A merge stopped on a code conflict, then aborted; a rebase stopped, then continued.
+    git(dir, &["checkout", "-qb", "team", "main~1"]);
+    std::fs::write(&path, record.replace("in src", "in team code")).unwrap();
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 5;\n").unwrap();
+    git(dir, &["commit", "-qam", "team", "--no-verify"]);
+    git(dir, &["checkout", "-q", "main"]);
+    let main_record = std::fs::read_to_string(&path).unwrap();
+    let main_d = main_record.clone();
+    let _ = main_d;
+    // Make the decision merge cleanly: team changes only what main didn't.
+    git(dir, &["checkout", "-q", "team"]);
+    std::fs::write(&path, main_record.clone() + "# team note\n").unwrap();
+    git(dir, &["commit", "-qam", "team note", "--no-verify"]);
+    git(dir, &["checkout", "-q", "main"]);
+    fails(&["merge", "-q", "--no-edit", "team"]);
+    fine("git merge --abort", &|| git(dir, &["merge", "--abort"]));
+    // A rebase stopped on a code conflict, then continued: it replays the person's decision.
+    git(dir, &["checkout", "-qb", "work", "main"]);
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 7;\n").unwrap();
+    git(dir, &["commit", "-qam", "code", "--no-verify"]);
+    let current = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{current}# the person's decision note\n")).unwrap();
+    git(dir, &["commit", "-qam", "decision note", "--no-verify"]);
+    git(dir, &["checkout", "-q", "main"]);
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 8;\n").unwrap();
+    git(dir, &["commit", "-qam", "main code", "--no-verify"]);
+    git(dir, &["checkout", "-q", "work"]);
+    fails(&["rebase", "-q", "main"]);
+    std::fs::write(dir.join("src/ui.ts"), "export const ui = 9;\n").unwrap();
+    git(dir, &["add", "src/ui.ts"]);
+    fine("git rebase --continue", &|| {
+        let out = Command::new("git")
+            .args(["-c", "core.editor=true", "rebase", "--continue"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    });
+}

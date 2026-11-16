@@ -886,27 +886,24 @@ pub fn staged_reviewed(git: &Git) -> BTreeMap<String, String> {
 /// What every ref points at, as `<commit> <refname>` lines (annotated tags peeled), and the
 /// stash.
 pub fn tips(git: &Git) -> (Vec<String>, Option<String>) {
-    let out = git
-        .try_run(&[
-            "for-each-ref",
-            "--format=%(objectname) %(*objectname) %(refname)",
-        ])
-        .unwrap_or_default();
-    let mut tips = Vec::new();
-    let mut stash = None;
-    for line in out.lines() {
-        let parts: Vec<&str> = line.split(' ').filter(|p| !p.is_empty()).collect();
-        let (sha, name) = match parts.as_slice() {
-            [_, peeled, name] => (*peeled, *name),
-            [sha, name] => (*sha, *name),
-            _ => continue,
-        };
-        if name == "refs/stash" {
-            stash = Some(sha.to_owned());
-        }
-        tips.push(format!("{sha} {name}"));
-    }
+    let tips = tips_of(git, &[]);
+    let stash = tips
+        .iter()
+        .find_map(|l| l.strip_suffix(" refs/stash").map(str::to_owned));
     (tips, stash)
+}
+
+fn tips_from(out: &str) -> Vec<String> {
+    out.lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split(' ').filter(|p| !p.is_empty()).collect();
+            match parts.as_slice() {
+                [_, peeled, name] => Some(format!("{peeled} {name}")),
+                [sha, name] => Some(format!("{sha} {name}")),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// `tips` lines as refname to commit.
@@ -919,13 +916,73 @@ pub fn parse_tips(lines: &[String]) -> BTreeMap<String, String> {
 }
 
 /// The ref's newest reflog entry says a fetch wrote it. A pull's fetch counts for
-/// remote-tracking refs (`pull_too`), not for the branch the pull merged into.
+/// remote-tracking refs (`pull_too`), not for the branch the pull merged into. Read from the
+/// reflog file: a fetch can update thousands of refs, too many to ask git one by one.
 pub fn fetched(git: &Git, name: &str, pull_too: bool) -> bool {
-    git.try_run(&["reflog", "show", "-1", "--format=%gs", name, "--"])
-        .is_some_and(|m| {
-            let m = m.trim_start();
-            m.starts_with("fetch") || (pull_too && m.starts_with("pull"))
+    let subject = common_dir(git)
+        .and_then(|dir| std::fs::read_to_string(dir.join("logs").join(name)).ok())
+        .and_then(|log| {
+            let last = log.lines().rev().find(|l| !l.trim().is_empty())?.to_owned();
+            last.split_once('\t').map(|(_, subject)| subject.to_owned())
+        });
+    subject.is_some_and(|m| {
+        let m = m.trim_start();
+        m.starts_with("fetch") || (pull_too && m.starts_with("pull"))
+    })
+}
+
+/// The git directory shared by all worktrees.
+pub fn common_dir(git: &Git) -> Option<std::path::PathBuf> {
+    git.try_run(&["rev-parse", "--git-common-dir"])
+        .map(|d| git.root().join(d.trim()))
+}
+
+/// The commits of a merge, cherry-pick or rebase in progress, and ORIG_HEAD, as
+/// `<NAME> <commit>`: read from their files in the git directory, no git call.
+pub fn pending_heads(git: &Git) -> Vec<String> {
+    ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REBASE_HEAD", "ORIG_HEAD"]
+        .iter()
+        .filter_map(|name| {
+            let text = std::fs::read_to_string(git.git_dir().join(name)).ok()?;
+            let sha = text.lines().next()?.trim().to_owned();
+            (sha.len() >= 40 && sha.chars().all(|c| c.is_ascii_hexdigit()))
+                .then(|| format!("{name} {sha}"))
         })
+        .collect()
+}
+
+/// A local branch or the stash points elsewhere than before the command.
+pub fn heads_or_stash_moved(git: &Git, before: &crate::session::BashSnapshot) -> bool {
+    let Some(tips) = &before.tips else {
+        return false;
+    };
+    let pick = |lines: &[String]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| {
+                l.split_once(' ')
+                    .is_some_and(|(_, n)| n.starts_with("refs/heads/") || n == "refs/stash")
+            })
+            .cloned()
+            .collect()
+    };
+    pick(tips) != pick(&tips_of(git, &["refs/heads", "refs/stash"]))
+}
+
+fn tips_of(git: &Git, patterns: &[&str]) -> Vec<String> {
+    let mut args = vec![
+        "for-each-ref",
+        "--format=%(objectname) %(*objectname) %(refname)",
+    ];
+    args.extend(patterns);
+    tips_from(&git.try_run(&args).unwrap_or_default())
+}
+
+/// The commit was made at or after `time` (seconds since the epoch): this command made it.
+pub fn created_since(git: &Git, commit: &str, time: u64) -> bool {
+    git.try_run(&["show", "-s", "--format=%ct", commit])
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .is_some_and(|t| t >= time)
 }
 
 /// The branch `HEAD` is on, if any.

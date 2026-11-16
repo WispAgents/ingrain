@@ -143,7 +143,8 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
                 // Only a git command moves through history; reading every ref costs ~0.1s in
                 // a repo with thousands. Without them, a move is judged strictly.
                 let command = payload["tool_input"]["command"].as_str().unwrap_or("");
-                let (tips, stash) = if command.contains("git") || command.contains("gh ") {
+                let tips_read = command.contains("git") || command.contains("gh ");
+                let (tips, stash) = if tips_read {
                     let (tips, stash) = bash::tips(&repo.git);
                     (Some(tips), stash)
                 } else {
@@ -158,6 +159,11 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
                     tips,
                     stash,
                     branch: bash::branch(&repo.git),
+                    pending: if tips_read {
+                        bash::pending_heads(&repo.git)
+                    } else {
+                        Vec::new()
+                    },
                 };
                 session.bash.insert(id.clone(), snap);
             }
@@ -196,6 +202,8 @@ struct History<'a> {
     now: Option<String>,
     /// A stash this command made.
     new_stash: Option<String>,
+    /// Heads of a merge, cherry-pick or rebase in progress.
+    pending: Vec<String>,
 }
 
 /// Refs before and after a command, and what can be trusted from them.
@@ -260,15 +268,9 @@ impl Refs {
                 if dropped.as_ref().is_some_and(|d| d.is_empty()) {
                     return None;
                 }
-                let mut args = vec![
-                    "log",
-                    "-1",
-                    "--format=%H",
-                    old.as_str(),
-                    "--not",
-                    new.as_str(),
-                    "--",
-                ];
+                // Dropped commits whose decisions are upstream anyway (a squash- or
+                // rebase-merged PR) drop nothing reviewed: compare the trees.
+                let mut args = vec!["diff", "--name-only", old.as_str(), new.as_str(), "--"];
                 args.extend(REVIEWED_PATHSPECS);
                 let touched = git.try_run(&args).is_none_or(|out| !out.trim().is_empty());
                 Some((name.trim_start_matches("refs/heads/").to_owned(), touched))
@@ -293,11 +295,12 @@ impl<'a> History<'a> {
             was: None,
             now: None,
             new_stash: None,
+            pending: Vec::new(),
         };
         let (Some(refs), Some(was)) = (refs, &before.head) else {
             return history;
         };
-        if !refs.rewound(git).is_empty() {
+        if refs.rewound(git).iter().any(|(_, touched)| *touched) {
             return history;
         }
         history.was = Some(was.clone());
@@ -314,15 +317,23 @@ impl<'a> History<'a> {
         }
         if let Some(stash) = refs.after.get("refs/stash")
             && Some(stash) != stash_before
+            && bash::created_since(git, stash, before.time)
         {
             history.new_stash = Some(stash.clone());
         }
-        // A merge, cherry-pick or rebase stopped halfway names what it brings in.
-        for name in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REBASE_HEAD"] {
-            if let Some(c) = bash::head_named(git, name)
-                && refs.existed(git, &c)
-            {
-                history.commits.push(c);
+        // A merge, cherry-pick or rebase stopped halfway names what it brings in, before or
+        // after the command (`--abort`, `--continue`); ORIG_HEAD is where a rebase started.
+        let after_pending = bash::pending_heads(git);
+        for entry in before.pending.iter().chain(&after_pending) {
+            let Some((name, c)) = entry.split_once(' ') else {
+                continue;
+            };
+            if refs.existed(git, c) {
+                history.commits.push(c.to_owned());
+                // ORIG_HEAD is only where something started, not content it brings in.
+                if name != "ORIG_HEAD" {
+                    history.pending.push(c.to_owned());
+                }
             }
         }
         if moved_head && let Some(now) = now_head {
@@ -360,7 +371,16 @@ impl<'a> History<'a> {
         let disk = bash::blob_on_disk(git, path);
         let was_blob = bash::blob_at(git, was, path);
         let now_blob = bash::blob_at(git, now, path);
-        if let Some(stamp) = before.files.get(path) {
+        // Content a merge, cherry-pick or rebase in progress put there isn't the person's edit.
+        let from_operation = |stamp: &str| {
+            self.pending.iter().any(|c| match git.show(c, path) {
+                Some(text) => bash::stamp_holds(stamp, text.as_bytes()),
+                None => stamp == "deleted",
+            })
+        };
+        if let Some(stamp) = before.files.get(path)
+            && !from_operation(stamp)
+        {
             // The person's uncommitted edit, back as it was (autostash, a stash around a
             // pull): not a change.
             let same = match std::fs::read(git.root().join(path)) {
@@ -739,10 +759,19 @@ fn post_tool_use(
                 reviewed.push(p);
             }
         }
-        let refs = Refs::new(&repo.git, &before);
+        // Reading refs (and their reflogs) only when it matters: a reviewed file changed, or a
+        // local branch or the stash moved.
+        let refs = if (!reviewed.is_empty() && !before.asked)
+            || bash::heads_or_stash_moved(&repo.git, &before)
+        {
+            Refs::new(&repo.git, &before)
+        } else {
+            None
+        };
         if let Some(refs) = &refs
             && let Some(stash) = refs.after.get("refs/stash")
             && refs.before.get("refs/stash") != Some(stash)
+            && bash::created_since(&repo.git, stash, before.time)
             && stash_tainted(repo, &before, stash)
         {
             session.tainted_stashes.insert(stash.clone());

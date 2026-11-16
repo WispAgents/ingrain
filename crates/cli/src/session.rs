@@ -47,6 +47,9 @@ pub struct BashSnapshot {
     pub stash: Option<String>,
     #[serde(default)]
     pub branch: Option<String>,
+    /// MERGE_HEAD, CHERRY_PICK_HEAD, REBASE_HEAD and ORIG_HEAD before the command.
+    #[serde(default)]
+    pub pending: Vec<String>,
 }
 
 impl Session {
