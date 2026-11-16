@@ -907,10 +907,10 @@ fn first_setup_does_not_reopen() {
     );
 }
 
-/// An approved accept then a commit is fine; an edit hidden from the size and mtime stamp,
-/// then committed, is not.
+/// An edit hidden from the size and mtime stamp is still seen; a deletion after an earlier
+/// approved one isn't excused by it.
 #[test]
-fn hidden_edit_of_an_accepted_file_is_caught_at_commit() {
+fn hidden_edits_of_reviewed_files_are_caught() {
     let tmp = repo();
     let dir = tmp.path();
     ok(dir, &["init", "--no-git-hook"]);
@@ -962,9 +962,85 @@ fn hidden_edit_of_an_accepted_file_is_caught_at_commit() {
         .unwrap();
     let after = hook(dir, "post-tool-use", sneaky).expect("blocked");
     assert_eq!(after["decision"], "block");
-    let commit = bash("h3", "git commit -qam x");
-    assert_eq!(decision_of(hook(dir, "pre-tool-use", commit.clone())), "");
-    git(dir, &["commit", "-qam", "x"]);
-    let after = hook(dir, "post-tool-use", commit).expect("commit flagged");
+    std::fs::write(&path, &text).unwrap();
+    git(dir, &["commit", "-qm", "record decision"]);
+
+    // An approved `git rm`, the file restored, then a hidden `rm`: reported.
+    let rm = bash("h3", "git rm -q decisions/D-0002.yml");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", rm.clone())), "ask");
+    git(dir, &["rm", "-q", "decisions/D-0002.yml"]);
+    assert!(hook(dir, "post-tool-use", rm).is_none());
+    git(
+        dir,
+        &["checkout", "-q", "HEAD", "--", "decisions/D-0002.yml"],
+    );
+    let hidden = bash("h4", "f=decisio; rm ${f}ns/D-0002.yml");
+    assert_eq!(decision_of(hook(dir, "pre-tool-use", hidden.clone())), "");
+    std::fs::remove_file(&path).unwrap();
+    let after = hook(dir, "post-tool-use", hidden).expect("reported");
     assert_eq!(after["decision"], "block");
+}
+
+/// First setup covers only the repository being set up, and a ledger committed outside agent
+/// sessions counts even after its branch is deleted.
+#[test]
+fn first_setup_stays_in_its_repo() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["checkout", "-q", "-b", "setup"]);
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    git(dir, &["checkout", "-q", "main"]);
+    git(dir, &["branch", "-qD", "setup"]);
+    let bash = |cwd: &Path, id: &str, command: &str| {
+        json!({"session_id": "o", "cwd": cwd, "tool_name": "Bash", "tool_use_id": id,
+            "tool_input": {"command": command}})
+    };
+    let accept = bash(dir, "o1", "ingrain decisions accept P-1");
+    assert_eq!(
+        decision_of(hook(dir, "pre-tool-use", accept)),
+        "ask",
+        "deleted branch"
+    );
+
+    // A fresh repository next to one with a ledger: its own setup is open, the other isn't.
+    let other = tempfile::tempdir().unwrap();
+    let fresh = other.path().join("fresh");
+    std::fs::create_dir_all(&fresh).unwrap();
+    git(&fresh, &["init", "-q"]);
+    let target = dir.join("decisions/D-0001.yml");
+    for command in [
+        format!("sed -i s/axios/x/ {}", target.display()),
+        format!("ingrain --repo {} decisions accept P-1", dir.display()),
+        "ingrain decisions accept P-1 --repo ../x".to_owned(),
+    ] {
+        let payload = bash(&fresh, "o2", &command);
+        assert_eq!(
+            decision_of(hook(&fresh, "pre-tool-use", payload)),
+            "ask",
+            "{command}"
+        );
+    }
+    let own = bash(&fresh, "o3", "ingrain decisions accept P-1");
+    assert_eq!(decision_of(hook(&fresh, "pre-tool-use", own)), "");
+
+    // Setup files written with the Write tool, then committed by an alias: not reported.
+    ok(&fresh, &["init", "--no-git-hook"]);
+    let write = json!({"session_id": "o", "cwd": fresh, "tool_name": "Write",
+        "tool_input": {"file_path": fresh.join("decisions/D-0001.yml"), "content": "id: D-0001\n"}});
+    assert_eq!(decision_of(hook(&fresh, "pre-tool-use", write)), "");
+    std::fs::write(fresh.join("decisions/D-0001.yml"), "id: D-0001\n").unwrap();
+    git(&fresh, &["config", "alias.ci", "commit"]);
+    git(&fresh, &["config", "user.email", "dev@example.com"]);
+    git(&fresh, &["config", "user.name", "Dev"]);
+    let ci = bash(&fresh, "o4", "git add -A && git ci -qm setup");
+    assert_eq!(decision_of(hook(&fresh, "pre-tool-use", ci.clone())), "");
+    git(&fresh, &["add", "-A"]);
+    git(&fresh, &["ci", "-qm", "setup"]);
+    assert!(hook(&fresh, "post-tool-use", ci).is_none());
 }

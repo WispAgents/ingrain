@@ -110,9 +110,12 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
         if tool == "Bash" {
             let command = payload["tool_input"]["command"].as_str().unwrap_or("");
             bash_ask = bash::needs_approval(command);
-            // Reading history can take a second in a big repo, and is only needed while setting
-            // up: for a command that would be asked, or one that may commit what setup wrote.
-            if (bash_ask.is_some() || command.contains("commit")) && is_first_setup(&git) {
+            // Only for this repository: a command naming paths outside it (`..`, absolute,
+            // `--repo`, variables) may change another one's ledger, so it's asked as usual.
+            if bash_ask.is_some()
+                && !bash::leaves_repo(command, dir, git.root())
+                && is_first_setup(&git)
+            {
                 first_setup = true;
                 bash_ask = bash::skips_verification(command);
             }
@@ -127,7 +130,11 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
 
     let decisions = repo.ledger.live_lenient();
     let answer = match event {
-        Event::SessionStart => session_start(&decisions, &mut session, payload),
+        Event::SessionStart => {
+            // Remember a ledger committed outside agent sessions before an agent can hide it.
+            ledger_committed(&repo.git);
+            session_start(&decisions, &mut session, payload)
+        }
         Event::PreToolUse if tool == "Bash" => {
             // Remember what was already changed, to tell what the command changes. Also
             // before an ask: an approved command's other changes are still checked.
@@ -199,18 +206,19 @@ const REVIEWED_PATHSPECS: &[&str] = &[
 /// Some commit on some ref has a reviewed file. Once true it stays true: remembered in the
 /// shared git dir (deleting the marker only costs a recount). If git can't tell, protect.
 fn ledger_committed(git: &ingrain_core::Git) -> bool {
-    let marker = git
-        .try_run(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .map(|d| {
-            std::path::PathBuf::from(d.trim())
-                .join("ingrain")
-                .join("ledger-committed")
-        });
+    // Relative to the root, where git runs; absolute for worktrees.
+    let marker = git.try_run(&["rev-parse", "--git-common-dir"]).map(|d| {
+        git.root()
+            .join(d.trim())
+            .join("ingrain")
+            .join("ledger-committed")
+    });
     if marker.as_ref().is_some_and(|m| m.is_file()) {
         return true;
     }
-    // Commits that touched a reviewed file, from every ref and HEAD; an empty repo has none.
-    let mut log = vec!["rev-list", "--all", "-1", "--"];
+    // Commits that touched a reviewed file, from every ref, HEAD and the reflogs (a deleted
+    // branch or a reset leaves its commits there); an empty repo has none.
+    let mut log = vec!["rev-list", "--all", "--reflog", "-1", "--"];
     log.extend(REVIEWED_PATHSPECS);
     let found = git.try_run(&log).is_none_or(|out| !out.trim().is_empty());
     if found && let Some(m) = marker {
@@ -362,23 +370,13 @@ fn post_tool_use(
         }
         // The pre-check reads shell syntax and can be fooled (variables, globs); this sees
         // what actually changed. Commands the person approved may change reviewed files.
-        let reviewed_changed: Vec<&String> = changed
+        // A file whose content is what it was before the command was only recorded by it
+        // (committed, staged); its content was checked when it changed. Reviewed files are
+        // stamped with a content hash, so keeping the size and mtime doesn't hide an edit.
+        let reviewed: Vec<&String> = changed
             .iter()
             .filter(|p| bash::is_reviewed_file(p))
-            .collect();
-        if before.asked {
-            // What the person approved; committing it later as it is isn't tampering.
-            for p in &reviewed_changed {
-                session
-                    .vouched
-                    .insert((*p).clone(), bash::stamp_of(&repo.git, p));
-            }
-        }
-        // A file left exactly as an approved command wrote it was only recorded (committed,
-        // staged) by this one.
-        let reviewed: Vec<&String> = reviewed_changed
-            .into_iter()
-            .filter(|p| session.vouched.get(*p) != Some(&bash::stamp_of(&repo.git, p)))
+            .filter(|p| before.files.get(*p) != Some(&bash::stamp_of(&repo.git, p)))
             .collect();
         if !before.asked && !reviewed.is_empty() {
             // The person may have edited it meanwhile, so don't tell the agent to restore it.

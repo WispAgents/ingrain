@@ -147,6 +147,85 @@ fn has_substitution(command: &str) -> bool {
     false
 }
 
+/// `command` may act on files outside the repository at `root`: a path (absolute, `~`, with
+/// `..`, or ingrain's `--repo`) that resolves outside it, or a variable or backtick expansion,
+/// which could point anywhere. Commit messages are data. `cwd` is where the command starts.
+pub fn leaves_repo(command: &str, cwd: &Path, root: &Path) -> bool {
+    let root = comparable(root);
+    lex(command).iter().any(|seg| {
+        let skip = commit_message_values(&seg.words);
+        let words = seg
+            .words
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !skip.contains(i))
+            .map(|(_, w)| w);
+        words.chain(&seg.redirects).chain(&seg.env).any(|w| {
+            if w.contains('`') || expands_variable(w) {
+                return true;
+            }
+            let value = w.split_once('=').map_or(w.as_str(), |(_, v)| v);
+            let pathish = value.starts_with(['/', '~', '\\'])
+                || value.contains("..")
+                || value.get(1..3).is_some_and(|d| d == ":/" || d == ":\\");
+            pathish && !comparable(&resolve(value, cwd)).starts_with(&root)
+        })
+    })
+}
+
+/// `$name`, `${…}` or `$1`: a shell variable; `$(` is a substitution whose commands are lexed.
+fn expands_variable(word: &str) -> bool {
+    word.match_indices('$').any(|(i, _)| {
+        word[i + 1..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '{' | '@' | '*'))
+    })
+}
+
+/// `word` as an absolute path: `~` is the home directory, relative paths start at `cwd`, and
+/// `.` / `..` are folded without touching the disk.
+fn resolve(word: &str, cwd: &Path) -> std::path::PathBuf {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    let joined = match (word.strip_prefix('~'), home) {
+        (Some(rest), Some(home)) => Path::new(&home).join(rest.trim_start_matches(['/', '\\'])),
+        _ => cwd.join(word),
+    };
+    let mut out = std::path::PathBuf::new();
+    for part in joined.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// A path as a comparable string: symlinks in its existing part resolved (`/tmp` is
+/// `/private/tmp` on macOS), `\\?\` dropped, `/` separators, a trailing `/`.
+fn comparable(path: &Path) -> String {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    let base = loop {
+        if let Ok(real) = std::fs::canonicalize(existing) {
+            break real;
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_owned());
+                existing = parent;
+            }
+            _ => break existing.to_path_buf(),
+        }
+    };
+    let full = rest.iter().rev().fold(base, |p, name| p.join(name));
+    let text = ingrain_core::git::normalize_path(&full.to_string_lossy()).replace('\\', "/");
+    format!("{}/", text.trim_end_matches('/'))
+}
+
 /// Why `command` skips ingrain's pre-commit check, if it does. Asked even during first setup.
 pub fn skips_verification(command: &str) -> Option<String> {
     lex(command).iter().find_map(skips_hooks)
@@ -319,7 +398,16 @@ fn global_options<S: AsRef<str>>(args: &[S]) -> usize {
 /// `ingrain` subcommands that accept, reject or retune what people review.
 fn ledger_command(words: &[&str]) -> Option<String> {
     let at = words.iter().position(|w| base_name(w) == "ingrain")?;
-    let rest = &words[at + 1 + global_options(&words[at + 1..])..];
+    // `--repo` is global: it may come before or after the subcommand.
+    let mut rest: Vec<&str> = Vec::new();
+    let mut args = words[at + 1..].iter();
+    while let Some(w) = args.next() {
+        if *w == "--repo" {
+            args.next();
+        } else if !w.starts_with("--repo=") {
+            rest.push(w);
+        }
+    }
     let (group, sub) = (rest.first().copied()?, rest.get(1).copied().unwrap_or(""));
     let mutating = match group {
         "decisions" => match sub {
@@ -562,9 +650,12 @@ pub fn snapshot(git: &Git) -> BTreeMap<String, String> {
 pub fn stamp_of(git: &Git, rel: &str) -> String {
     let path = git.root().join(rel);
     let stamp = stamp(&path);
+    if !is_reviewed_file(rel) {
+        return stamp;
+    }
     match std::fs::read(&path) {
-        Ok(bytes) if is_reviewed_file(rel) => format!("{stamp}:{:016x}", content_hash(&bytes)),
-        _ => stamp,
+        Ok(bytes) => format!("{stamp}:{:016x}", content_hash(&bytes)),
+        Err(_) => stamp,
     }
 }
 
@@ -689,6 +780,8 @@ mod tests {
             "ingrain decisions list; rm -rf decisions",
             "ingrain --repo . decisions accept P-1",
             "ingrain --repo=. rules mode x block",
+            "ingrain decisions --repo ../other accept P-1",
+            "ingrain rules mode --repo=. x block",
         ] {
             assert!(needs_approval(cmd).is_some(), "{cmd}");
         }
@@ -738,6 +831,39 @@ mod tests {
             "ingrain --repo . decisions for src/a.ts; git branch",
         ] {
             assert!(needs_approval(cmd).is_none(), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn commands_that_leave_the_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let r = root.display().to_string();
+        for cmd in [
+            "sed -i s/a/b/ ../../other/decisions/D-0001.yml".to_owned(),
+            "ingrain --repo ../../other decisions accept P-1".to_owned(),
+            "ingrain decisions accept P-1 --repo=/x".to_owned(),
+            "cd /tmp/x && ingrain decisions accept P-1".to_owned(),
+            "rm ~/r/decisions/D-0001.yml".to_owned(),
+            "f=decisions; rm $f/D-0001.yml".to_owned(),
+            "rm ${HOME}/decisions/D-0001.yml".to_owned(),
+            "cat `pwd`/decisions/D-0001.yml".to_owned(),
+            format!("cd {r}/sub/../.. && rm x"),
+        ] {
+            assert!(leaves_repo(&cmd, &root.join("sub"), &root), "{cmd}");
+        }
+        for cmd in [
+            "ingrain decisions accept P-1 P-2".to_owned(),
+            "git add decisions .corrections && git commit -qm 'set up ingrain...'".to_owned(),
+            "ingrain decisions reject P-3 --reason 'too vague'".to_owned(),
+            format!("cd {r} && ingrain decisions accept P-1"),
+            format!("ingrain --repo {r}/sub/.. decisions accept P-1"),
+            "cd .. && ingrain decisions accept P-1".to_owned(),
+            "git commit -m \"$(cat <<'EOF'\nset up ingrain: see ../docs and /etc\nEOF\n)\""
+                .to_owned(),
+        ] {
+            assert!(!leaves_repo(&cmd, &root.join("sub"), &root), "{cmd}");
         }
     }
 
