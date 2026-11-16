@@ -189,3 +189,10 @@ Goal: a developer adds ingrain to their agent and repo in one or two commands.
 - Ledger: line-above override scope, dedupe polarity/numbers, file-name scopes, `*` within one directory.
 - Rules: one correction still proposes a rule, without self-certification; single-fix one-offs held back
   (still common today, generic name, test-only). datasette: 33 candidates → 7 proposed, 12 held back.
+
+# v0.2.4: ingrain inside agent sessions (PR #14)
+
+- First setup waives approval for an allowlist of setup commands until a ledger is committed on any
+  ref; live headless runs: 6/6 setups accepted and committed with no refusals.
+- History rule: reviewed files that match history a command moved through (checkout, merge, rebase,
+  fetched remotes, stash, in-progress operations) aren't tampering; rewinds and new content are.
