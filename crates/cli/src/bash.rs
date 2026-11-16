@@ -301,8 +301,12 @@ pub fn setup_command(command: &str, root: &Path) -> bool {
                 "cd" => match rest {
                     [] => false,
                     [dir] => {
+                        // Absolute: `/…`, or `C:/…` in Git Bash on Windows.
+                        let absolute = dir.starts_with('/')
+                            || dir.get(1..3) == Some(":/")
+                                && dir.starts_with(|c: char| c.is_ascii_alphabetic());
                         *dir == "."
-                            || (dir.starts_with('/')
+                            || (absolute
                                 && root_dir.is_some()
                                 && std::fs::canonicalize(dir.as_str()).ok() == root_dir)
                     }
@@ -1293,7 +1297,11 @@ mod tests {
     fn setup_commands() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        let cd_root = format!("cd {} && ingrain decisions accept P-1", root.display());
+        // As Git Bash on Windows writes it: forward slashes.
+        let cd_root = format!(
+            "cd {} && ingrain decisions accept P-1",
+            root.display().to_string().replace('\\', "/")
+        );
         for cmd in [
             cd_root.as_str(),
             "git add decisions/ && git commit -m 'Set up ingrain' && git push -u origin ingrain-setup",

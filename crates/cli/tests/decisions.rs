@@ -1405,7 +1405,10 @@ fn history_rule_edges() {
     // A bare remote the team pushes to.
     let remote = tempfile::tempdir().unwrap();
     let bare = remote.path().join("r.git");
-    git(remote.path(), &["init", "-q", "--bare", "r.git"]);
+    git(
+        remote.path(),
+        &["init", "-q", "--bare", "-b", "main", "r.git"],
+    );
     git(dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
     git(dir, &["push", "-q", "origin", "main"]);
 
@@ -1499,7 +1502,10 @@ fn history_rule_edges_2() {
     let record = std::fs::read_to_string(&path).unwrap();
     let remote = tempfile::tempdir().unwrap();
     let bare = remote.path().join("r.git");
-    git(remote.path(), &["init", "-q", "--bare", "r.git"]);
+    git(
+        remote.path(),
+        &["init", "-q", "--bare", "-b", "main", "r.git"],
+    );
     git(dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
     git(dir, &["push", "-q", "-u", "origin", "main"]);
     // The team moves the remote ahead (no decision change).
@@ -1596,7 +1602,10 @@ fn history_rule_edges_3() {
     let record = std::fs::read_to_string(&path).unwrap();
     let remote = tempfile::tempdir().unwrap();
     let bare = remote.path().join("r.git");
-    git(remote.path(), &["init", "-q", "--bare", "r.git"]);
+    git(
+        remote.path(),
+        &["init", "-q", "--bare", "-b", "main", "r.git"],
+    );
     git(dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
     git(dir, &["push", "-q", "-u", "origin", "main"]);
 
