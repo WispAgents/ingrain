@@ -23,7 +23,7 @@ Nothing becomes a rule without a person accepting it.
 ```sh
 brew install wispagents/tap/ingrain   # macOS and Linux
 # or from source, any OS:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.2 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.3 ingrain
 ```
 
 Prebuilt binaries for macOS, Linux and Windows (x64 and arm64) are on the
@@ -217,7 +217,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.2.2
+      - uses: WispAgents/ingrain/action@v0.2.3
 ```
 
 ## Layout
