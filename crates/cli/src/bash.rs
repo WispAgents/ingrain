@@ -56,6 +56,18 @@ const GIT_READ_ONLY: &[&str] = &[
     "cat-file",
     "add",
     "rev-parse",
+    // These move no files in the working tree.
+    "fetch",
+    "branch",
+    "remote",
+    "tag",
+    "rev-list",
+    "describe",
+    "shortlog",
+    "merge-base",
+    "name-rev",
+    "for-each-ref",
+    "reflog",
 ];
 
 /// Why the person should approve `command` before it runs, if they should.
@@ -1176,6 +1188,7 @@ mod tests {
             "ingrain decisions list --all && npm test",
             "ingrain rules list; git stash list",
             "ingrain --repo . decisions for src/a.ts; git branch",
+            "git status; git branch -vv; git remote -v; git diff decisions/D-0003.yml; git fetch origin",
             "ingrain decisions accept --help; ingrain rules mode -h",
             "ingrain decisions add --propose x 2>&1; \\\ningrain decisions add --propose y",
             "ls -R decisions; for f in decisions/pending/*; do echo \"== $f\"; cat \"$f\"; done",
