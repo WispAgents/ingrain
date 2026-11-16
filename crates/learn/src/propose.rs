@@ -34,7 +34,7 @@ pub struct ProposeOptions<'a> {
 impl Default for ProposeOptions<'_> {
     fn default() -> Self {
         Self {
-            min_support: 3,
+            min_support: 1,
             min_precision: 0.5,
             max_after_rate: 0.1,
             llm: None,
@@ -460,10 +460,18 @@ mod tests {
             .collect();
         let opts = ProposeOptions {
             known_before: 2,
+            min_support: 3,
             ..Default::default()
         };
         let (props, _) = propose(&cs, &[], &opts).unwrap();
         assert!(props.is_empty(), "only 2 corrections before the cutoff");
+        // By default one correction is enough.
+        let opts = ProposeOptions {
+            known_before: 1,
+            ..Default::default()
+        };
+        let (props, _) = propose(&cs, &[], &opts).unwrap();
+        assert_eq!(props.len(), 1, "a single fix proposes a rule by default");
 
         let opts = ProposeOptions {
             taken_ids: ["avoid-fetch-call".to_string()].into(),

@@ -174,3 +174,10 @@ Goal: a developer adds ingrain to their agent and repo in one or two commands.
   One live agent run with `--plugin-dir` on a scratch repo used ingrain-setup end to end: 2 decisions
   with checks, commit on a branch. Found: extract read ingrain's own AGENTS.md block → fixed (skipped).
 - [ ] 4. README "Use it from your coding agent" (done); PR, review, merge; release v0.2.1; tap
+
+# v0.2.2: Windows; one correction is enough
+
+- `rules propose|eval --min-corrections N` (default: config `min_support`, now 1). On datasette
+  (157 corrections, templates only): min 3 → 0 rules, min 1 → 13 rules. Real hits among them
+  (`PluginSQL` → `PermissionSQL` rename), plus one-off noise (`r3`); review filters it.
+- README no longer quotes the public-repo verdict; docs/validation.md keeps the study.
