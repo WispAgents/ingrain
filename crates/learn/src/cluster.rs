@@ -101,12 +101,14 @@ pub fn anchors(c: &Correction) -> Vec<Anchor> {
         .collect()
 }
 
-/// Key for "the same fix event": corrections from one commit or comment count once.
+/// Key for "the same fix event": corrections from one commit, review comment or agent
+/// session count once. A session is one event however many edits it has: the same
+/// person correcting the same agent in one chat is not independent evidence.
 pub fn source_key(c: &Correction) -> String {
     match &c.source {
-        ingrain_core::Source::GitFixup { fix_commit, .. } => fix_commit.clone(),
-        ingrain_core::Source::ReviewSuggestion { url } => url.clone(),
-        ingrain_core::Source::Transcript { session } => format!("{session}:{}", c.time),
+        ingrain_core::Source::GitFixup { fix_commit, .. } => format!("commit:{fix_commit}"),
+        ingrain_core::Source::ReviewSuggestion { url } => format!("review:{url}"),
+        ingrain_core::Source::Transcript { session } => format!("session:{session}"),
     }
 }
 

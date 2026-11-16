@@ -187,7 +187,8 @@ model), and keeps a rule only if it catches the past mistakes, spares the fixed 
 precise on agent code humans kept. One correction is enough to propose a rule; pass
 `--min-corrections 3` (or set `min_support` in `.corrections/config.yml`) to wait for a mistake to
 repeat. Accepted rules start in shadow mode; `ingrain rules promote` moves them to warn and block
-from their hit log. `ingrain rules eval` measures the whole loop on your history.
+from their hit log. Shadow hits are invisible to the agent, so leaving shadow needs hits a human
+later corrected (at least 3, and half of all hits, per the mined corrections). `ingrain rules eval` measures the whole loop on your history.
 
 ## Commands
 

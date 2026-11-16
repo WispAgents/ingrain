@@ -9,7 +9,7 @@ use anyhow::Result;
 use ingrain_core::{AgentHunk, Correction};
 use ingrain_engine::{Parsed, lang};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 /// "Repeated" in the report: a correction in a cluster of at least this many fixes.
@@ -160,6 +160,10 @@ pub fn evaluate(
     let known = |t: i64| t >= cutoff;
     // Relevance is per rule, so the cache is keyed by rule id + correction id.
     let mut relevance: HashMap<String, HashMap<String, bool>> = HashMap::new();
+    // Test corrections each rule's hits caught. Only test-period hunks are scored, and
+    // a training correction's source hunk predates it (so the cutoff), so the hunks
+    // held out while training never reach this loop: no train/test leakage.
+    let mut caught_by_rule: HashMap<String, HashSet<String>> = HashMap::new();
     let mut durations = Vec::new();
     for (n, h) in test_hunks.iter().enumerate() {
         let Some(language) = lang::detect(&h.path) else {
@@ -189,9 +193,16 @@ pub fn evaluate(
         let lines: Vec<&str> = h.snippet.text.lines().collect();
         for (rule, j) in judged {
             let r = per_rule.get_mut(rule).expect("rule report");
-            r.test_true_hits += j.true_hits();
+            // True positives per correction, as in training (`backtest::score`).
+            let caught = caught_by_rule.entry(rule.clone()).or_default();
+            let new = j
+                .true_corrections
+                .iter()
+                .filter(|c| caught.insert((*c).clone()))
+                .count() as u32;
+            r.test_true_hits += new;
             r.test_false_hits += j.false_hits();
-            report.test_true_hits += j.true_hits();
+            report.test_true_hits += new;
             report.test_false_hits += j.false_hits();
             for (line, is_true) in j.hits {
                 if report.samples.len() >= opts.max_samples {
@@ -258,9 +269,22 @@ mod tests {
                 c
             })
             .collect();
+        // A test-period agent hunk: one later fix (c5) rewrote all three fetch lines,
+        // and a kept fetch in another hunk.
+        let mut fixed = crate::backtest::tests::hunk(
+            "const a = await fetch(x);\nconst b = await fetch(y);\nconst c = await fetch(z);\n",
+            None,
+            5,
+        );
+        fixed.corrected.push(ingrain_core::CorrectedLines {
+            lines: ingrain_core::LineRange::new(1, 3),
+            time: 5,
+            correction: "c5".into(),
+        });
+        let kept = crate::backtest::tests::hunk("const k = await fetch(k);\n", None, 6);
         let report = evaluate(
             &cs,
-            &[],
+            &[fixed, kept],
             EvalOptions {
                 split: 0.5,
                 propose: ProposeOptions::default(),
@@ -272,5 +296,11 @@ mod tests {
         assert_eq!(report.test_corrections, 4);
         assert_eq!(report.prevented, 4);
         assert!((report.recall - 1.0).abs() < f64::EPSILON);
+        assert_eq!(report.test_agent_hunks, 2);
+        assert_eq!(
+            (report.test_true_hits, report.test_false_hits),
+            (1, 1),
+            "true positives per correction, as in training"
+        );
     }
 }

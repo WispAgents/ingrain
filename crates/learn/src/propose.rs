@@ -146,13 +146,19 @@ pub fn propose(
             .map(|(_, &m)| cluster::source_key(&train[m]))
             .collect::<HashSet<_>>()
             .len();
-        // A rule backed by one fix always catches that fix; it also needs a hit on other agent code.
-        let evidence = caught_support >= 2 || s.true_hits + s.false_hits > 0;
-        caught_support >= opts.min_support
-            && evidence
-            && s.after_rate() <= opts.max_after_rate
-            && s.precision_lower_bound()
-                .is_none_or(|p| p >= opts.min_precision)
+        // Precision is measured on agent code other than the cluster's own source hunks
+        // (see `backtest::score`). When the rule fired there, the Wilson bound decides.
+        // When it didn't (no agent hunks, e.g. transcript corrections, or only its own),
+        // there is no precision evidence and the corrections are all we have: a rule
+        // always catches the fix it was learned from, so it must catch at least two
+        // distinct fix events (commits, review comments, sessions). This is a floor
+        // under `min_support`, not a replacement: `--min-corrections 1` still proposes
+        // from one fix when that rule hits other agent code humans corrected.
+        let precise = match s.precision_lower_bound() {
+            Some(p) => p >= opts.min_precision,
+            None => caught_support >= 2,
+        };
+        caught_support >= opts.min_support && precise && s.after_rate() <= opts.max_after_rate
     };
 
     // Templates: cheap, run in parallel.
@@ -428,6 +434,33 @@ mod tests {
     }
 
     #[test]
+    fn one_chat_is_one_fix_event() {
+        let edit = |i: i64, session: &str| {
+            let mut c = correction(
+                &format!("t{i}"),
+                "TypeScript",
+                &format!("const r{i} = await fetch(u{i});"),
+                &format!("const r{i} = await apiClient.get(u{i});"),
+                "unused",
+            );
+            c.source = Source::Transcript {
+                session: session.into(),
+            };
+            c.time = i;
+            c
+        };
+        // Two edits in one chat: no agent hunks, so no precision evidence, and one event.
+        let one_chat = [edit(1, "s1"), edit(2, "s1")];
+        let (props, stats) = propose(&one_chat, &[], &ProposeOptions::default()).unwrap();
+        assert!(props.is_empty(), "one chat is not two independent fixes");
+        assert!(stats.explain.iter().all(|e| e.support == 1));
+        // The same edits in two chats are two fix events.
+        let two_chats = [edit(1, "s1"), edit(2, "s2")];
+        let (props, _) = propose(&two_chats, &[], &ProposeOptions::default()).unwrap();
+        assert!(props.iter().any(|p| p.rule.id == "avoid-fetch-call"));
+    }
+
+    #[test]
     fn learnable_at_is_the_nth_distinct_fix() {
         let mk = |fix: &str, t: i64| {
             let mut c = correction(fix, "TypeScript", "a", "b", fix);
@@ -475,20 +508,45 @@ mod tests {
         };
         let (props, _) = propose(&cs, &[], &opts).unwrap();
         assert!(props.is_empty(), "one fix and no other evidence");
-        // The agent hunk c0 came from: its corrected line is a true hit.
-        // (3 hits: the precision lower bound needs them to clear 50%).
-        let mut agent =
-            crate::backtest::tests::hunk("x = fetch(a);\ny = fetch(b);\nz = fetch(c);\n", None, 0);
-        agent.corrected.push(ingrain_core::CorrectedLines {
-            lines: ingrain_core::LineRange::new(1, 3),
+        // The agent hunk c0 came from is not evidence for a rule learned from c0, however
+        // many of its lines the fix rewrote.
+        let corrected = |id: &str, lines: u32| ingrain_core::CorrectedLines {
+            lines: ingrain_core::LineRange::new(1, lines),
             time: 0,
-            correction: "c0".into(),
-        });
-        let (props, _) = propose(&cs, &[agent], &opts).unwrap();
+            correction: id.into(),
+        };
+        let mut own =
+            crate::backtest::tests::hunk("x = fetch(a);\ny = fetch(b);\nz = fetch(c);\n", None, 0);
+        own.corrected.push(corrected("c0", 3));
+        let (props, _) = propose(&cs, std::slice::from_ref(&own), &opts).unwrap();
+        assert!(props.is_empty(), "a single fix does not certify itself");
+
+        // Independent evidence: other agent code the rule flags that humans corrected
+        // (here they fixed the fetch arguments, a different cluster). Three such hunks
+        // clear the 50% precision bound, so the single fetch → api.get fix is proposed.
+        let mut with_evidence = cs[..1].to_vec();
+        let mut agent = vec![own];
+        for i in 1..=3 {
+            let mut c = correction(
+                &format!("d{i}"),
+                "TypeScript",
+                &format!("y = fetch(alpha{i});"),
+                &format!("y = fetch(beta{i});"),
+                &format!("g{i}"),
+            );
+            c.time = 0;
+            with_evidence.push(c);
+            let mut h = crate::backtest::tests::hunk(&format!("y = fetch(alpha{i});\n"), None, 0);
+            h.corrected.push(corrected(&format!("d{i}"), 1));
+            agent.push(h);
+        }
+        let (props, _) = propose(&with_evidence, &agent, &opts).unwrap();
+        let ids: Vec<&str> = props.iter().map(|p| p.rule.id.as_str()).collect();
         assert_eq!(
-            props.len(),
-            1,
-            "a single fix with agent-code hits proposes a rule"
+            ids,
+            ["avoid-fetch-call"],
+            "a single fix with independent agent-code hits proposes a rule; \
+             the one-fix `alpha` clusters have no outside evidence"
         );
 
         let opts = ProposeOptions {
