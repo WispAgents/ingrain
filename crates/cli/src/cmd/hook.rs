@@ -19,7 +19,7 @@ use ingrain_core::{DiffBase, LineRange, Mode};
 use ingrain_ledger::scope::{self, Scope};
 use ingrain_ledger::{Checker, Record, Target, Violation, message};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
@@ -182,74 +182,137 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
 /// The commits a command moved to or brought in that people already reviewed: a reviewed file
 /// that now matches one of them came from history (checkout, merge, rebase, pull, stash), not
 /// from the agent. Trusted: commits reachable from the refs before the command, and refs this
-/// command fetched (their reflog says fetch or pull, so not a push or the agent's own commit).
-/// Never trusted: a branch moved back or sideways to an existing commit (reset, checkout -B),
-/// and, for the person's uncommitted edits, anything but a new stash that keeps them.
+/// command fetched (a remote-tracking ref updated by fetch or pull, a branch written by fetch),
+/// so not a push, the agent's own commit, or a branch a pull merged into. Never trusted: a
+/// branch moved back or sideways onto an existing commit (reset, checkout -B), a stash an
+/// agent command filled with its own edits, and, for the person's uncommitted edits, anything
+/// but leaving them as they were or a new stash that keeps them.
 struct History<'a> {
     repo: &'a Repo,
     /// Commits a file may match, whatever its state before.
     commits: Vec<String>,
-    /// Where the command started; only for files that were clean before it.
+    /// Where the command started, and `HEAD` after it.
     was: Option<String>,
-    /// A stash this command made: the person's edits are kept there.
+    now: Option<String>,
+    /// A stash this command made.
     new_stash: Option<String>,
+}
+
+/// Refs before and after a command, and what can be trusted from them.
+struct Refs {
+    before: BTreeMap<String, String>,
+    after: BTreeMap<String, String>,
+    /// Commits reachable from these existed, reviewed, before the command.
+    roots: Vec<String>,
+}
+
+impl Refs {
+    fn new(git: &ingrain_core::Git, before: &BashSnapshot) -> Option<Self> {
+        let (tips, was) = (before.tips.as_ref()?, before.head.as_ref()?);
+        let before_refs = bash::parse_tips(tips);
+        let after = bash::parse_tips(&bash::tips(git).0);
+        let mut roots: Vec<String> = before_refs.values().cloned().collect();
+        roots.push(was.clone());
+        for (name, sha) in &after {
+            if before_refs.get(name) == Some(sha) {
+                continue;
+            }
+            // Only refs with reflogs, read one by one: tags (thousands, after `--tags`) never
+            // count.
+            let fetched = if name.starts_with("refs/remotes/") {
+                bash::fetched(git, name, true)
+            } else if name.starts_with("refs/heads/") {
+                bash::fetched(git, name, false)
+            } else {
+                false
+            };
+            if fetched {
+                roots.push(sha.clone());
+            }
+        }
+        roots.sort();
+        roots.dedup();
+        Some(Self {
+            before: before_refs,
+            after,
+            roots,
+        })
+    }
+
+    fn existed(&self, git: &ingrain_core::Git, commit: &str) -> bool {
+        let roots: Vec<&str> = self.roots.iter().map(String::as_str).collect();
+        bash::new_commits(git, commit, &roots, 1).is_some_and(|n| n.is_empty())
+    }
+
+    /// Local branches moved back or sideways onto a commit that existed, and the commits
+    /// they dropped that changed reviewed files.
+    fn rewound(&self, git: &ingrain_core::Git) -> Vec<(String, bool)> {
+        self.before
+            .iter()
+            .filter(|(name, _)| name.starts_with("refs/heads/"))
+            .filter_map(|(name, old)| {
+                let new = self.after.get(name)?;
+                if new == old || !self.existed(git, new) {
+                    return None;
+                }
+                // Fast-forward: nothing dropped. If git can't tell, count it as rewound.
+                let dropped = bash::new_commits(git, old, &[new.as_str()], 1);
+                if dropped.as_ref().is_some_and(|d| d.is_empty()) {
+                    return None;
+                }
+                let mut args = vec![
+                    "log",
+                    "-1",
+                    "--format=%H",
+                    old.as_str(),
+                    "--not",
+                    new.as_str(),
+                    "--",
+                ];
+                args.extend(REVIEWED_PATHSPECS);
+                let touched = git.try_run(&args).is_none_or(|out| !out.trim().is_empty());
+                Some((name.trim_start_matches("refs/heads/").to_owned(), touched))
+            })
+            .collect()
+    }
 }
 
 impl<'a> History<'a> {
     fn new(
         repo: &'a Repo,
         before: &BashSnapshot,
+        refs: Option<&Refs>,
         now_head: Option<&str>,
         moved_head: bool,
+        tainted: &BTreeSet<String>,
     ) -> Self {
         let git = &repo.git;
         let mut history = Self {
             repo,
             commits: Vec::new(),
             was: None,
+            now: None,
             new_stash: None,
         };
-        let (Some(tips), Some(was)) = (&before.tips, &before.head) else {
+        let (Some(refs), Some(was)) = (refs, &before.head) else {
             return history;
         };
-        let before_refs = bash::parse_tips(tips);
-        let after_refs = bash::parse_tips(&bash::tips(git).0);
-        // Refs this command fetched into (a pull, `gh pr checkout`).
-        let fetched: Vec<&str> = after_refs
-            .iter()
-            .filter(|(name, sha)| before_refs.get(name.as_str()) != Some(*sha))
-            .filter(|(name, _)| bash::fetched(git, name))
-            .map(|(_, sha)| sha.as_str())
-            .collect();
-        let mut roots: Vec<&str> = before_refs.values().map(String::as_str).collect();
-        roots.push(was);
-        roots.extend(&fetched);
-        roots.sort();
-        roots.dedup();
-        let existed = |c: &str| bash::new_commits(git, c, &roots, 1).is_some_and(|n| n.is_empty());
-        let ancestor = |old: &str, new: &str| {
-            bash::new_commits(git, old, &[new], 1).is_some_and(|n| n.is_empty())
-        };
-        // A branch reset back or sideways onto an existing commit drops reviewed history.
-        let rewound = before_refs.iter().any(|(name, old)| {
-            name.starts_with("refs/heads/")
-                && after_refs
-                    .get(name)
-                    .is_some_and(|new| new != old && existed(new) && !ancestor(old, new))
-        });
-        if rewound {
+        if !refs.rewound(git).is_empty() {
             return history;
         }
         history.was = Some(was.clone());
-        let stash_before = before_refs.get("refs/stash");
-        if let Some(stash) = stash_before {
+        history.now = now_head.map(str::to_owned).or(Some(was.clone()));
+        let stash_before = refs.before.get("refs/stash");
+        if let Some(stash) = stash_before
+            && !tainted.contains(stash)
+        {
             history.commits.push(stash.clone());
             // `stash -u` keeps untracked files in a third parent.
             history
                 .commits
                 .extend(bash::head_named(git, &format!("{stash}^3")));
         }
-        if let Some(stash) = after_refs.get("refs/stash")
+        if let Some(stash) = refs.after.get("refs/stash")
             && Some(stash) != stash_before
         {
             history.new_stash = Some(stash.clone());
@@ -257,23 +320,23 @@ impl<'a> History<'a> {
         // A merge, cherry-pick or rebase stopped halfway names what it brings in.
         for name in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REBASE_HEAD"] {
             if let Some(c) = bash::head_named(git, name)
-                && existed(&c)
+                && refs.existed(git, &c)
             {
                 history.commits.push(c);
             }
         }
         if moved_head && let Some(now) = now_head {
-            if existed(now) {
+            if refs.existed(git, now) {
                 history.commits.push(now.to_owned());
             } else if let Some(new) = bash::new_commits(git, now, &[was.as_str()], 100_000) {
                 // Trusted tips it merged or rebased onto.
                 let new: std::collections::HashSet<&str> = new.iter().map(String::as_str).collect();
                 history.commits.extend(
-                    roots
+                    refs.roots
                         .iter()
-                        .filter(|t| new.contains(**t))
+                        .filter(|t| new.contains(t.as_str()))
                         .take(64)
-                        .map(|t| (*t).to_owned()),
+                        .cloned(),
                 );
             }
         }
@@ -282,20 +345,32 @@ impl<'a> History<'a> {
         history
     }
 
-    /// `path` on disk (and in the index) is as reviewed history has it.
-    fn explains(&self, path: &str, before: &BashSnapshot, staged: Option<&String>) -> bool {
+    /// `path` on disk, in the index and in `HEAD` is as reviewed history has it.
+    fn explains(
+        &self,
+        path: &str,
+        before: &BashSnapshot,
+        staged_before: Option<&String>,
+        staged: Option<&String>,
+    ) -> bool {
         let git = &self.repo.git;
-        let Some(was) = &self.was else {
+        let (Some(was), Some(now)) = (&self.was, &self.now) else {
             return false;
         };
         let disk = bash::blob_on_disk(git, path);
-        let mut blobs: Vec<Option<String>> = self
-            .commits
-            .iter()
-            .map(|c| bash::blob_at(git, c, path))
-            .collect();
+        let was_blob = bash::blob_at(git, was, path);
+        let now_blob = bash::blob_at(git, now, path);
         if let Some(stamp) = before.files.get(path) {
-            // The person's uncommitted edit: only a new stash that keeps it explains it going.
+            // The person's uncommitted edit, back as it was (autostash, a stash around a
+            // pull): not a change.
+            let same = match std::fs::read(git.root().join(path)) {
+                Ok(bytes) => bash::stamp_holds(stamp, &bytes),
+                Err(_) => stamp == "deleted",
+            };
+            if same && now_blob == was_blob && staged == staged_before {
+                return true;
+            }
+            // Gone: only a new stash that keeps it explains that.
             let kept = self.new_stash.as_deref().is_some_and(|s| {
                 [s.to_owned(), format!("{s}^3")]
                     .iter()
@@ -308,10 +383,68 @@ impl<'a> History<'a> {
                 return false;
             }
         }
-        blobs.push(bash::blob_at(git, was, path));
-        blobs.contains(&disk)
-            && staged.is_none_or(|s| disk.as_ref() == Some(s) || blobs.contains(&Some(s.clone())))
+        let mut blobs: Vec<Option<String>> = self
+            .commits
+            .iter()
+            .map(|c| bash::blob_at(git, c, path))
+            .collect();
+        // Where it started counts only while `HEAD` still has the same version (not after
+        // `git rm --cached` and a commit).
+        if now_blob == was_blob {
+            blobs.push(was_blob);
+        }
+        let staged_ok = match staged {
+            Some(s) => disk.as_ref() == Some(s) || blobs.contains(&Some(s.clone())),
+            None => now_blob.is_none(),
+        };
+        blobs.contains(&disk) && (blobs.contains(&now_blob) || now_blob == disk) && staged_ok
     }
+}
+
+/// A stash an agent command made holds reviewed files other than the person's own edits (the
+/// agent's, a formatter's): popping it later is not reviewed history.
+fn stash_tainted(repo: &Repo, before: &BashSnapshot, stash: &str) -> bool {
+    let git = &repo.git;
+    let Some(was) = &before.head else {
+        return true;
+    };
+    let mut paths: Vec<String> = Vec::new();
+    let mut args = vec!["diff", "--name-only", "-z", was.as_str(), stash, "--"];
+    args.extend(REVIEWED_PATHSPECS);
+    paths.extend(
+        git.try_run(&args)
+            .unwrap_or_default()
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned),
+    );
+    let untracked = format!("{stash}^3");
+    let mut args = vec![
+        "ls-tree",
+        "-r",
+        "-z",
+        "--name-only",
+        untracked.as_str(),
+        "--",
+    ];
+    args.extend(REVIEWED_PATHSPECS);
+    if bash::head_named(git, &untracked).is_some() {
+        paths.extend(
+            git.try_run(&args)
+                .unwrap_or_default()
+                .split('\0')
+                .filter(|p| !p.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    paths.iter().any(|p| {
+        let stored = git.show(stash, p).or_else(|| git.show(&untracked, p));
+        match (before.files.get(p), stored) {
+            (Some(stamp), Some(text)) => !bash::stamp_holds(stamp, text.as_bytes()),
+            (Some(stamp), None) => stamp != "deleted",
+            (None, _) => true,
+        }
+    })
 }
 
 const SETUP_HINT: &str = " ingrain is being set up in this repository (no decision is committed \
@@ -606,9 +739,51 @@ fn post_tool_use(
                 reviewed.push(p);
             }
         }
+        let refs = Refs::new(&repo.git, &before);
+        if let Some(refs) = &refs
+            && let Some(stash) = refs.after.get("refs/stash")
+            && refs.before.get("refs/stash") != Some(stash)
+            && stash_tainted(repo, &before, stash)
+        {
+            session.tainted_stashes.insert(stash.clone());
+        }
         if !reviewed.is_empty() && !before.asked {
-            let history = History::new(repo, &before, now_head.as_deref(), moved_head);
-            reviewed.retain(|p| !history.explains(p, &before, staged_now.get(*p)));
+            let history = History::new(
+                repo,
+                &before,
+                refs.as_ref(),
+                now_head.as_deref(),
+                moved_head,
+                &session.tainted_stashes,
+            );
+            reviewed.retain(|p| {
+                !history.explains(p, &before, staged_before.get(*p), staged_now.get(*p))
+            });
+        }
+        // A branch moved back past commits that changed reviewed files, even when the files
+        // here didn't change (`git branch -f main HEAD~1`).
+        let dropped: Vec<String> = refs
+            .as_ref()
+            .map(|r| r.rewound(&repo.git))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, touched)| *touched)
+            .map(|(name, _)| name)
+            .collect();
+        if !before.asked && reviewed.is_empty() && !dropped.is_empty() && !legacy {
+            let list: Vec<String> = dropped.iter().map(|b| format!("`{b}`")).collect();
+            let list = list.join(", ");
+            return Ok(Some(json!({
+                "decision": "block",
+                "reason": format!(
+                    "That command moved {list} back past commits that changed decisions or \
+                     learned rules, which people review. Stop and tell the user what it did so \
+                     they can keep or undo it (`git reflog` has the old commit)."
+                ),
+                "systemMessage": format!(
+                    "ingrain: the agent moved {list} back past reviewed decision changes. Check it."
+                ),
+            })));
         }
         if legacy {
             reviewed.clear();

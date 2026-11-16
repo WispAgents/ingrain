@@ -906,12 +906,13 @@ pub fn parse_tips(lines: &[String]) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// The ref's newest reflog entry says it was fetched (`fetch`, `pull`), not pushed or set.
-pub fn fetched(git: &Git, name: &str) -> bool {
+/// The ref's newest reflog entry says a fetch wrote it. A pull's fetch counts for
+/// remote-tracking refs (`pull_too`), not for the branch the pull merged into.
+pub fn fetched(git: &Git, name: &str, pull_too: bool) -> bool {
     git.try_run(&["reflog", "show", "-1", "--format=%gs", name, "--"])
         .is_some_and(|m| {
             let m = m.trim_start();
-            m.starts_with("fetch") || m.starts_with("pull")
+            m.starts_with("fetch") || (pull_too && m.starts_with("pull"))
         })
 }
 

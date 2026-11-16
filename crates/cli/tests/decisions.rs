@@ -1482,3 +1482,100 @@ fn history_rule_edges() {
     fine("git stash -u", &|| git(dir, &["stash", "-qu"]));
     fine("git stash pop", &|| git(dir, &["stash", "pop", "-q"]));
 }
+
+/// From the second review of the history rule.
+#[test]
+fn history_rule_edges_2() {
+    let tmp = repo();
+    let dir = tmp.path();
+    ok(dir, &["init", "--no-git-hook"]);
+    ok(
+        dir,
+        &["add", "No axios in src.", "--forbid-import", "axios"],
+    );
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-qm", "set up ingrain"]);
+    let path = dir.join("decisions/D-0001.yml");
+    let record = std::fs::read_to_string(&path).unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    let bare = remote.path().join("r.git");
+    git(remote.path(), &["init", "-q", "--bare", "r.git"]);
+    git(dir, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(dir, &["push", "-q", "-u", "origin", "main"]);
+    // The team moves the remote ahead (no decision change).
+    let team = tempfile::tempdir().unwrap();
+    git(team.path(), &["clone", "-q", bare.to_str().unwrap(), "t"]);
+    let t = team.path().join("t");
+    git(&t, &["config", "user.email", "dev@example.com"]);
+    git(&t, &["config", "user.name", "Dev"]);
+    let team_push = |name: &str| {
+        std::fs::write(t.join(name), "x\n").unwrap();
+        git(&t, &["add", "."]);
+        git(&t, &["commit", "-qm", name]);
+        git(&t, &["push", "-q", "origin", "HEAD:main"]);
+    };
+    team_push("a.txt");
+
+    let n = std::cell::Cell::new(0);
+    let run_hooked = |command: &str, steps: &dyn Fn()| -> Option<Value> {
+        n.set(n.get() + 1);
+        let payload = json!({"session_id": "f", "cwd": dir, "tool_name": "Bash",
+            "tool_use_id": format!("f{}", n.get()), "tool_input": {"command": command}});
+        hook(dir, "pre-tool-use", payload.clone());
+        steps();
+        hook(dir, "post-tool-use", payload)
+    };
+    let blocked = |command: &str, steps: &dyn Fn()| {
+        let after = run_hooked(command, steps).unwrap_or_else(|| panic!("{command}"));
+        assert_eq!(after["decision"], "block", "{command}");
+    };
+    let fine = |command: &str, steps: &dyn Fn()| {
+        let after = run_hooked(command, steps);
+        assert!(after.is_none(), "{command}: {after:?}");
+    };
+    let edit = || std::fs::write(&path, record.replace("axios", "AXIOS")).unwrap();
+
+    // The agent's own edit, committed, then a pull: still the agent's edit.
+    blocked(
+        "sh edit.sh; git commit -qam x; git pull --no-rebase --no-edit",
+        &|| {
+            edit();
+            git(dir, &["commit", "-qam", "x", "--no-verify"]);
+            git(dir, &["pull", "-q", "--no-rebase", "--no-edit"]);
+        },
+    );
+    git(dir, &["reset", "-q", "--hard", "origin/main"]);
+    // Untracked and committed: the decision is gone from HEAD.
+    blocked("sh rmc.sh; git commit -qm x", &|| {
+        git(dir, &["rm", "-q", "--cached", "decisions/D-0001.yml"]);
+        git(dir, &["commit", "-qm", "x", "--no-verify"]);
+    });
+    git(dir, &["reset", "-q", "--hard", "origin/main"]);
+    // An edit laundered through the stash.
+    fine("sh edit.sh && git stash", &|| {
+        edit();
+        git(dir, &["stash", "-q"]);
+    });
+    blocked("git stash pop", &|| git(dir, &["stash", "pop", "-q"]));
+    git(dir, &["checkout", "-q", "--", "decisions/D-0001.yml"]);
+
+    // The person's dirty edit, carried through an autostash pull and a stash around a pull.
+    team_push("b.txt");
+    std::fs::write(&path, format!("{record}# the person's edit\n")).unwrap();
+    fine("git pull --rebase --autostash", &|| {
+        git(dir, &["pull", "-q", "--rebase", "--autostash"]);
+    });
+    team_push("c.txt");
+    fine("git stash && git pull && git stash pop", &|| {
+        git(dir, &["stash", "-q"]);
+        git(dir, &["pull", "-q", "--no-rebase"]);
+        git(dir, &["stash", "pop", "-q"]);
+    });
+    git(dir, &["checkout", "-q", "--", "decisions/D-0001.yml"]);
+
+    // Rewinding in two steps: moving the branch is reported when it drops decision commits.
+    git(dir, &["checkout", "-q", "--detach"]);
+    blocked("git branch -f main HEAD~4", &|| {
+        git(dir, &["branch", "-f", "main", "HEAD~4"]);
+    });
+}

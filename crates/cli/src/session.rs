@@ -15,6 +15,9 @@ pub struct Session {
     pub edited: BTreeSet<String>,
     #[serde(default)]
     pub stop_attempts: u32,
+    /// Stashes agent commands filled with edits that weren't the person's: not history.
+    #[serde(default)]
+    pub tainted_stashes: BTreeSet<String>,
     /// Changed files before each running Bash command, by tool use id: the PostToolUse hook
     /// compares to find the files the command changed.
     #[serde(default)]
@@ -51,6 +54,7 @@ impl Session {
     /// hook used up, which must not come back from disk.
     pub fn merge(&mut self, on_disk: Session, consumed: Option<&str>) {
         self.edited.extend(on_disk.edited);
+        self.tainted_stashes.extend(on_disk.tainted_stashes);
         for (id, snap) in on_disk.bash {
             if Some(id.as_str()) != consumed {
                 self.bash.entry(id).or_insert(snap);
