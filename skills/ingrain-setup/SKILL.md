@@ -12,12 +12,12 @@ committing or pushing.
 
 ## 1. Make sure the `ingrain` binary is installed
 
-Run `ingrain --version`. If it works and prints 0.2.3 or later, go to step 2.
+Run `ingrain --version`. If it works and prints 0.2.4 or later, go to step 2.
 
 Otherwise ask the user, then install it with the first option that applies:
 
 - macOS or Linux with Homebrew (`brew --version`): `brew install wispagents/tap/ingrain`
-- Rust available (`cargo --version`): `cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.3 ingrain`
+- Rust available (`cargo --version`): `cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.4 ingrain`
 - Otherwise download the archive for this platform from https://github.com/WispAgents/ingrain/releases/latest
   and put the binary on the PATH:
   - macOS / Linux: `ingrain-<version>-<target>.tar.gz` (`aarch64-apple-darwin`, `x86_64-apple-darwin`,
@@ -86,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.2.3
+      - uses: WispAgents/ingrain/action@v0.2.4
 ```
 
 ## 5. Commit on a branch

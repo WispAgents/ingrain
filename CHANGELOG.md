@@ -6,10 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-16
+
 ### Added
 
+- First setup: until a decision, rule or ingrain config is committed on any ref, an agent can
+  accept proposals and commit the setup without a person approving, so "use ingrain in this
+  repo" finishes in headless sessions. Only plain setup commands are let through; a refusal
+  says how to get through.
+- `ingrain --help` and `ingrain init` list the setup steps for agents without the skills.
 - Contribution guide, code of conduct, security policy, issue and PR templates, CODEOWNERS.
 - Dependabot for Cargo and GitHub Actions, `cargo deny` checks in CI, declared MSRV.
+
+### Fixed
+
+- Checkout, merge, rebase (`--continue`, `--autostash`), pull and stash no longer block when
+  they bring in reviewed decision changes. New content, rewound branches, restored older
+  versions and the person's discarded decision edits are still reported.
+- Committing a decision accepted with approval, a partly staged decision, or unstaging one is no
+  longer reported as tampering. Same-size, same-mtime edits and index-only changes are.
+- Fewer false asks: `ingrain decisions for`, `--help`, `--repo` after the subcommand,
+  `git fetch`/`branch`/`remote` next to a decision path, reading `core.hooksPath`, line
+  continuations and shell loops.
+- Asks before removing ingrain's marker, reflogs or refs that show a ledger was committed.
 
 ## [0.2.3] - 2026-11-16
 
@@ -59,7 +78,8 @@ All notable changes to this project are documented here. The format follows
 - First release: learn lint rules from human corrections of agent code, enforce them in Claude Code
   hooks, pre-commit and CI. Prebuilt binaries and a GitHub Action.
 
-[Unreleased]: https://github.com/WispAgents/ingrain/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/WispAgents/ingrain/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/WispAgents/ingrain/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/WispAgents/ingrain/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/WispAgents/ingrain/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/WispAgents/ingrain/compare/v0.1.0...v0.2.1
