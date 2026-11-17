@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Docs site: an mdBook in `docs/book/`, deployed to GitHub Pages from `main`, with a CLI
+  reference generated from the binary by the hidden `ingrain --markdown-help` flag.
+
 ## [0.2.4] - 2026-11-16
 
 ### Added

@@ -47,12 +47,23 @@ If you change dependencies, also run [`cargo deny check`](https://github.com/Emb
 (`cargo install cargo-deny`). It checks licenses, advisories and duplicate sources against
 [deny.toml](deny.toml).
 
+## Docs
+
+The user docs are an [mdBook](https://rust-lang.github.io/mdBook/) in `docs/book/`, published to
+GitHub Pages from `main`. `docs/book/src/reference/cli.md` is generated from the `clap`
+definitions; regenerate it whenever you change a command, flag or help text (CI fails otherwise):
+
+```sh
+cargo run -q -p ingrain -- --markdown-help > docs/book/src/reference/cli.md
+mdbook serve docs/book   # http://localhost:3000, needs `brew install mdbook` or `cargo install mdbook`
+```
+
 ## Pull requests
 
 - Branch from `main`. One topic per PR. Keep unrelated refactors out.
 - Add or update tests for behaviour changes. End-to-end CLI tests live in `crates/cli/tests/`.
-- Update [README.md](README.md) when you change a command, flag, file layout or hook behaviour, and
-  add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md).
+- Update [README.md](README.md) and the matching page in `docs/book/` when you change a command,
+  flag, file layout or hook behaviour, and add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md).
 - `ingrain check` must never call a model, and checks only flag added lines. Keep it that way.
 - Windows is supported: use `std::path` APIs rather than `/`-joined strings, and don't pass
   `\\?\` verbatim paths to git.

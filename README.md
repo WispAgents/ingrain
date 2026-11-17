@@ -3,6 +3,7 @@
 [![ci](https://github.com/WispAgents/ingrain/actions/workflows/ci.yml/badge.svg)](https://github.com/WispAgents/ingrain/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/WispAgents/ingrain)](https://github.com/WispAgents/ingrain/releases/latest)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![docs](https://img.shields.io/badge/docs-book-informational)](https://wispagents.github.io/ingrain/)
 [![msrv](https://img.shields.io/badge/rustc-1.90%2B-orange)](Cargo.toml)
 
 **Problem:** your coding agent keeps breaking what your team already settled. It re-adds the
@@ -22,6 +23,9 @@ Rules come from two places:
   live in `.corrections/rules/`.
 
 Nothing becomes a rule without a person accepting it.
+
+**Docs:** [wispagents.github.io/ingrain](https://wispagents.github.io/ingrain/), with guides and a
+full [CLI reference](https://wispagents.github.io/ingrain/reference/cli.html).
 
 ### Decisions or learned rules?
 
