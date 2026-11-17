@@ -67,7 +67,31 @@ enum Command {
     },
 }
 
+/// Hidden flag that prints the CLI reference as Markdown, for `docs/book/src/reference/cli.md`.
+const MARKDOWN_HELP_FLAG: &str = "--markdown-help";
+
+/// The CLI reference as Markdown. The book's sidebar already lists the commands, so the overview
+/// is left out, the per-command "Options:" headings become bold text so they stay out of it, the
+/// preformatted agent help is fenced so its alignment survives, and empty defaults are dropped.
+fn markdown_help() -> String {
+    let options = clap_markdown::MarkdownOptions::new()
+        .title("CLI reference".to_string())
+        .show_footer(false)
+        .show_table_of_contents(false);
+    clap_markdown::help_markdown_custom::<Cli>(&options)
+        .replace("###### **", "**")
+        .replace("\n\n  Default value: ``\n", "\n")
+        .replace(AGENT_HELP, &format!("```text\n{AGENT_HELP}\n```"))
+}
+
 fn main() -> ExitCode {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|a| a == MARKDOWN_HELP_FLAG)
+    {
+        print!("{}", markdown_help());
+        return ExitCode::SUCCESS;
+    }
     let cli = Cli::parse();
     let dir = cli.repo.unwrap_or_else(|| std::path::PathBuf::from("."));
     let result = match cli.command {

@@ -1,0 +1,19 @@
+[book]
+title = "ingrain"
+description = "Keep coding agents in line with what your team decided."
+authors = ["WispAgents"]
+language = "en"
+src = "src"
+
+[build]
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/WispAgents/ingrain"
+edit-url-template = "https://github.com/WispAgents/ingrain/edit/main/docs/book/{path}"
+site-url = "/ingrain/"
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.search]
+limit-results = 20
