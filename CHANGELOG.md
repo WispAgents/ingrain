@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+
 ### Added
 
 - `ingrain viewer`: a desktop viewer for decisions and learned rules, built into the binary with
@@ -14,7 +16,6 @@ All notable changes to this project are documented here. The format follows
   modes, weekly hits and backtests; a timeline; and "applies to" for any path. Opens from any
   folder, a recent list, a folder dialog or a dropped folder, and updates when files change.
   Every change runs `ingrain`'s own commands. Project, local and global stores show together.
-
 - The viewer is the default `viewer` Cargo feature. The macOS and Windows binaries include it
   (about 30 MB larger). The Linux binaries leave it out, so `ingrain` still runs in any container
   or CI image. Building with the viewer needs Rust 1.99 and, on Linux, `libxkbcommon-dev` and
@@ -105,7 +106,8 @@ All notable changes to this project are documented here. The format follows
 - First release: learn lint rules from human corrections of agent code, enforce them in Claude Code
   hooks, pre-commit and CI. Prebuilt binaries and a GitHub Action.
 
-[Unreleased]: https://github.com/WispAgents/ingrain/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/WispAgents/ingrain/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/WispAgents/ingrain/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/WispAgents/ingrain/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/WispAgents/ingrain/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/WispAgents/ingrain/compare/v0.2.2...v0.2.3

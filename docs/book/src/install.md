@@ -3,7 +3,8 @@
 ```sh
 brew install wispagents/tap/ingrain   # macOS and Linux
 # or from source, any OS:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.3.0 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.4.0 ingrain
+# on Linux without the GUI libraries, or Rust older than 1.99: add --no-default-features
 ```
 
 `ingrain viewer`, the desktop window, is in the macOS and Windows binaries. The Linux prebuilt binaries leave the viewer out, so `ingrain` runs in any container or CI

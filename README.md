@@ -48,7 +48,7 @@ can't be edited by agents, and are checked together by `ingrain check`, the pre-
 ```sh
 brew install wispagents/tap/ingrain   # macOS and Linux
 # or from source, any OS:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.3.0 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.4.0 ingrain
 ```
 
 Prebuilt binaries for macOS, Linux and Windows (x64 and arm64) are on the
@@ -318,7 +318,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.3.0
+      - uses: WispAgents/ingrain/action@v0.4.0
 ```
 
 ## Layout

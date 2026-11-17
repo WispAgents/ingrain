@@ -1758,7 +1758,7 @@ dependencies = [
 
 [[package]]
 name = "ingrain"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "ingrain-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1791,7 +1791,7 @@ dependencies = [
 
 [[package]]
 name = "ingrain-engine"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "ast-grep-config",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "ingrain-learn"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "globset",
@@ -1820,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "ingrain-ledger"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "ast-grep-language",
