@@ -7,6 +7,16 @@ description: Set up ingrain in the current repository so coding agents follow th
 
 ingrain keeps the rules agents must follow in the repo (`decisions/` and `.corrections/rules/`),
 shows the relevant ones before each edit, and blocks edits, commits and PRs that break them.
+
+There are two kinds of rules:
+
+- **Decisions** (`decisions/`): what the team states up front, as a sentence with a reason, a scope
+  and optional checks. They are seeded in step 3 from docs and then recorded with `ingrain-decide`.
+  Without checks they are only shown. With checks they deny a breaking edit before it lands.
+- **Learned rules** (`.corrections/rules/`): ast-grep lint rules mined from corrections people made
+  to agent code, run after edits in shadow, warn or block mode. They come later, from history (the
+  `ingrain-rules` skill).
+
 Follow these steps in order. Ask the user before installing software, accepting decisions,
 committing or pushing.
 

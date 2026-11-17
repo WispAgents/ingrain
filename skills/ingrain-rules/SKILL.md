@@ -9,6 +9,17 @@ ingrain finds places where a person rewrote code an agent wrote, groups the repe
 ast-grep rule for each, and tests it on the repo's history. Rules live in `.corrections/rules/`;
 agents never edit them. The `ingrain` binary must be installed (see the `ingrain-setup` skill).
 
+## Learned rule or decision?
+
+ingrain has two kinds of rules. This skill covers **learned rules**: ast-grep patterns mined from
+mistakes people kept fixing in agent code, backtested on history. They run after edits in shadow,
+warn or block mode. **Decisions** (`decisions/`) are rules someone states up front, as a sentence
+with a reason, a scope and optional checks. They are shown before edits, and a decision with checks
+denies a breaking edit before it lands. They belong to the `ingrain-decide` skill.
+
+If the user states a rule ("never use X", "from now on…"), don't wait for it to be learned: record
+it as a decision with `ingrain-decide`. Use this skill to find the rules nobody wrote down.
+
 A single correction is enough to propose a rule. Every proposal still has to pass the backtest,
 and the user reviews each one, so expect some one-off fixes among them: reject those with a reason.
 

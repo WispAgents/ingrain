@@ -8,6 +8,18 @@ description: Record, change or look up a project decision in the repo's ingrain 
 Decisions live in `decisions/D-NNNN.yml`. Agents never edit those files; they propose, and a person
 accepts. The `ingrain` binary must be installed (see the `ingrain-setup` skill).
 
+## Decision or learned rule?
+
+ingrain has two kinds of rules. This skill covers **decisions**: what someone states up front
+("we don't use Redis", "billing calls the payments client"), stored as a sentence with a reason,
+a scope and optional checks. A decision without checks is shown before edits in scope; with checks,
+a breaking edit is denied before it lands. **Learned rules** (`.corrections/rules/`) are ast-grep
+lint rules mined from corrections people made to agent code. They run after edits in shadow, warn
+or block mode. They belong to the `ingrain-rules` skill.
+
+When the user states a rule, record a decision, even if it could also be a lint rule. Learned rules
+only come from `ingrain rules mine` / `ingrain rules propose`.
+
 ## Look up what applies
 
 ```sh
