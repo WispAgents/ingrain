@@ -111,6 +111,34 @@ ingrain rules review                        # accept / edit / reject
 git commit decisions/ .corrections/ -m "ingrain rules"
 ```
 
+## See it: the viewer
+
+`ingrain view` opens a desktop app on the repository you are in. Use it to read what was decided
+and why, review proposals, and see how things changed.
+
+![The viewer's inbox](docs/book/src/images/viewer/inbox.png)
+
+- **Inbox**: proposals one at a time. `A` accepts, `R` rejects with a reason, `J` skips.
+- **Decisions**: each one with why, what was not chosen, where it applies, the check that enforces
+  it, where it was decided, what it replaced, and its git history with each change's diff.
+- **Learned rules**: set the mode (shadow, warn, block), see hits per week, overrides, the fix the
+  rule learned from and its backtest.
+- **Timeline**: every decision by month. Replaced ones are struck through and point to the new one.
+- **Applies to…**: type a path, or drop a file on the window, to see what an agent gets for it.
+- **Stores**: project, local and global decisions and rules show together, tagged; the sidebar
+  filters by store once you have personal ones.
+- Open it from anywhere: `ingrain view ~/code/app`, or run `ingrain-viewer` and pick a recent
+  repository. `ingrain --global view` shows only your personal rules. Drop a folder on the
+  window to open it.
+
+The window updates by itself when files change. Every change it makes (accept, reject, supersede,
+mode) runs the `ingrain` CLI, so it does exactly what the commands do. The viewer is a separate
+program built with [Rune](https://github.com/anomalyco/rune); install it with Rust 1.99 or newer:
+
+```sh
+cargo install --locked --git https://github.com/WispAgents/ingrain ingrain-viewer
+```
+
 ## Just for you: local and global stores
 
 Decisions and rules don't have to be committed. Two personal stores sit next to the project's
@@ -274,6 +302,7 @@ later corrected (at least 3, and half of all hits, per the mined corrections); `
 | `check [paths] [--staged \| --diff RANGE] [--format text\|json\|github]` | Rules and decisions on added lines |
 | `decisions add \| extract \| review \| accept \| reject \| supersede \| list \| show \| for \| stale` | The decision ledger |
 | `rules mine \| propose [--explain] [--min-corrections N] \| review \| accept \| reject \| list \| mode \| promote \| eval` | Learned rules |
+| `view [path] [--select ID]` | Open the desktop viewer (`--global view`: your personal rules) |
 | `hook <session-start\|pre-tool-use\|post-tool-use\|stop>` | Claude Code hook entry point |
 
 ## CI
@@ -314,6 +343,10 @@ cargo test --all --locked
 Crates: `core` (data model, rule files, git), `engine` (ast-grep), `learn` (capture, cluster, rule
 writing, backtest, eval), `ledger` (decisions, scope, checks, extraction), `cli` (the `ingrain`
 binary). [PLAN.md](PLAN.md) is the working plan.
+
+The viewer lives in `viewer/`, its own Cargo workspace (Rune needs a newer Rust than the CLI's
+MSRV): `cd viewer && cargo test`. `python3 viewer/scripts/demo-repo.py /tmp/harbor` builds a demo
+repository to try it on; [docs/viewer/PLAN.md](docs/viewer/PLAN.md) has its user stories.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR, [SECURITY.md](SECURITY.md) to report a
 vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release notes. This project follows a

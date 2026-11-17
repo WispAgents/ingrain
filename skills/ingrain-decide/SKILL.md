@@ -28,6 +28,9 @@ ingrain decisions list            # all live decisions
 ingrain decisions show D-0012     # one in full
 ```
 
+For the user, `ingrain view` opens the same decisions in a desktop window, with their history and
+an inbox to accept or reject proposals. Suggest it to them; don't use it yourself.
+
 These include the user's personal decisions: `L-` ids (this repository only, kept in
 `.git/ingrain/local/`) and `G-` ids (every repository, kept in `~/.config/ingrain/`). Follow them like
 `D-` ones; they are never committed, so don't look for them in `decisions/`.

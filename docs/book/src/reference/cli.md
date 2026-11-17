@@ -34,6 +34,7 @@ Guide: https://github.com/WispAgents/ingrain/blob/main/skills/ingrain-setup/SKIL
 * `check` — Check added lines against learned rules and decisions (pre-commit, CI)
 * `decisions` — The decision ledger: record, extract, review, supersede and list decisions
 * `rules` — Learned lint rules: mine corrections, propose, review, promote and evaluate rules
+* `view` — Open the desktop viewer: browse, review and trace decisions and rules (`--global`: only your personal rules)
 * `hook` — Claude Code hook entry point (reads the hook JSON on stdin)
 
 **Options:**
@@ -410,6 +411,22 @@ Time-split evaluation: learn from older corrections, score on newer ones
   Default value: `10`
 * `--min-corrections <MIN_CORRECTIONS>` — Corrections of the same pattern needed before a rule is proposed (default: `min_support` in .corrections/config.yml, 1 unless set). Raise it for fewer, better-supported rules
 * `--json <JSON>` — Write the full report as JSON
+
+
+
+## `ingrain view`
+
+Open the desktop viewer: browse, review and trace decisions and rules (`--global`: only your personal rules)
+
+**Usage:** `ingrain view [OPTIONS] [PATH]`
+
+**Arguments:**
+
+* `<PATH>` — A folder inside the repository to open (default: the current directory, or `--repo`)
+
+**Options:**
+
+* `--select <ID>` — Open on this item, e.g. `D-0004` or a rule id
 
 
 

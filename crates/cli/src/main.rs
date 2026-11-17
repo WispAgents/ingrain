@@ -69,6 +69,9 @@ enum Command {
         #[command(subcommand)]
         command: cmd::rules::Command,
     },
+    /// Open the desktop viewer: browse, review and trace decisions and rules (`--global`: only
+    /// your personal rules).
+    View(cmd::view::Args),
     /// Claude Code hook entry point (reads the hook JSON on stdin).
     Hook {
         event: cmd::hook::Event,
@@ -116,6 +119,7 @@ fn main() -> ExitCode {
         Command::Decisions { command } => cmd::decisions::run(&dir, command),
         Command::Hook { event, from_plugin } => cmd::hook::run(&dir, event, from_plugin),
         Command::Rules { command } => cmd::rules::run(&dir, command),
+        Command::View(args) => cmd::view::run(&dir, cli.global, args),
     };
     match result {
         Ok(code) => code,

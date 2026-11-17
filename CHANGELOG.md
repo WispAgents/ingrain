@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `ingrain view`: a desktop viewer for decisions and learned rules (`ingrain-viewer`, built with
+  Rune, in `viewer/`). An inbox to accept or reject proposals by keyboard; a page per decision
+  with why, rejected options, scope, checks, sources, lineage and git history with diffs; rule
+  modes, weekly hits and backtests; a timeline; and "applies to" for any path. Opens from any
+  folder, a recent list, a folder dialog or a dropped folder, and updates when files change.
+  Every change runs the `ingrain` CLI.
+
 ## [0.3.0] - 2026-11-17
 
 ### Added
