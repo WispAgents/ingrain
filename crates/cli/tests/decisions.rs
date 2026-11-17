@@ -51,6 +51,10 @@ fn run(dir: &Path, args: &[&str], stdin: &str) -> Output {
         .current_dir(dir)
         .env("HOME", dir.join(".home"))
         .env("PATH", path_env(dir))
+        // The global store comes from HOME; a developer's own must not leak in.
+        .env_remove("INGRAIN_HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("CLAUDE_PROJECT_DIR")
         .stdin(Stdio::piped())

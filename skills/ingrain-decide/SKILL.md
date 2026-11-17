@@ -28,6 +28,10 @@ ingrain decisions list            # all live decisions
 ingrain decisions show D-0012     # one in full
 ```
 
+These include the user's personal decisions: `L-` ids (this repository only, kept in
+`.git/ingrain/local/`) and `G-` ids (every repository, kept in `~/.config/ingrain/`). Follow them like
+`D-` ones; they are never committed, so don't look for them in `decisions/`.
+
 ## Record a new decision
 
 When the user states something future code must follow, turn it into one record:
@@ -44,6 +48,13 @@ ingrain decisions add --propose "Billing code calls the payments client, never r
   --forbid-pattern 'TypeScript:fetch($$$A)'
 ```
 
+Where it goes: by default, the repository's own store (`decisions/`, committed, ids `D-`). If the
+user says it's their own preference for every repository ("I always want…", "in all my projects"),
+add `--global` (ids `G-`, kept in `~/.config/ingrain/`). If they want it for this repository but not
+committed, add `--local` (ids `L-`, kept in `.git/ingrain/local/`). Put the flag right after
+`ingrain`: `ingrain --global decisions add --propose "…"`. In a repo set up with
+`ingrain init --local`, plain `add` already goes to the local store.
+
 Other checks: `--forbid-import node-fetch`, `--forbid-dep redis`. `--category` takes `convention`,
 `constraint`, `api_change`, `architecture` or `scope`.
 
@@ -59,7 +70,8 @@ the hook refuses it: give the user the exact `ingrain decisions accept <P-id>` c
 ingrain decisions supersede D-0012 --decision "<the new decision>" --reason "<why it changed>"
 ```
 
-The old decision stays in force until the user accepts the replacement (`ingrain decisions accept
+This works the same for `L-` and `G-` ids: the proposal goes to the same store, and
+`accept` finds it there. The old decision stays in force until the user accepts the replacement (`ingrain decisions accept
 <P-id>`); accepting retires the old one. To drop a decision entirely, supersede it with one that
 says so, so the history keeps the reason.
 

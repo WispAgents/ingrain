@@ -141,14 +141,23 @@ pub struct Rejection {
 #[derive(Debug, Clone)]
 pub struct Ledger {
     pub dir: PathBuf,
+    /// Where it lives; decides the prefix of accepted ids (`D-`, `L-`, `G-`).
+    pub store: ingrain_core::Store,
 }
 
 impl Ledger {
     pub const DIR: &'static str = "decisions";
 
+    /// The project ledger: `<root>/decisions`.
     pub fn new(root: &Path) -> Self {
+        Self::in_store(root, ingrain_core::Store::Project)
+    }
+
+    /// `<base>/decisions` for `store` (see `ingrain_core::Store::dir`).
+    pub fn in_store(base: &Path, store: ingrain_core::Store) -> Self {
         Self {
-            dir: root.join(Self::DIR),
+            dir: base.join(Self::DIR),
+            store,
         }
     }
 
@@ -185,19 +194,26 @@ impl Ledger {
     /// Live records, skipping (and reporting) files that don't parse, so one broken file
     /// (say, with merge-conflict markers) doesn't switch off every hook.
     pub fn live_lenient(&self) -> Vec<Record> {
+        self.records_lenient()
+            .into_iter()
+            .filter(Record::is_live)
+            .collect()
+    }
+
+    /// Accepted and superseded records, skipping (and reporting) files that don't parse.
+    pub fn records_lenient(&self) -> Vec<Record> {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return Vec::new();
         };
         let mut out: Vec<Record> = entries
             .flatten()
             .map(|e| e.path())
-            .filter(|p| is_record_file(p))
+            .filter(|p| p.is_file() && is_record_file(p))
             .filter_map(|p| {
                 Record::load(&p)
                     .map_err(|e| eprintln!("decisions: skipping {}: {e:#}", p.display()))
                     .ok()
             })
-            .filter(Record::is_live)
             .collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
@@ -232,7 +248,12 @@ impl Ledger {
 
     /// A proposal id that isn't taken yet.
     pub fn fresh_pending_id(&self, seed: &str) -> Result<String> {
-        let base = proposal_id(seed);
+        // Personal stores mix in their name, so the same text proposed to two stores gets two
+        // ids (`accept` finds a proposal's store by its id). Project ids stay as they were.
+        let base = match self.store {
+            ingrain_core::Store::Project => proposal_id(seed),
+            store => proposal_id(&format!("{}\0{seed}", store.name())),
+        };
         let mut id = base.clone();
         let mut n = 2;
         while self.pending_path(&id)?.exists() {
@@ -254,15 +275,16 @@ impl Ledger {
         Record::load(&self.pending_path(id)?).with_context(|| format!("no pending decision `{id}`"))
     }
 
-    /// The next free `D-NNNN` id.
+    /// The next free `D-NNNN` id (`L-` in the local store, `G-` in the global one).
     pub fn next_id(&self) -> Result<String> {
+        let prefix = self.store.id_prefix();
         let max = self
             .records()?
             .iter()
-            .filter_map(|r| r.id.strip_prefix("D-")?.parse::<u32>().ok())
+            .filter_map(|r| r.id.strip_prefix(prefix)?.parse::<u32>().ok())
             .max()
             .unwrap_or(0);
-        Ok(format!("D-{:04}", max + 1))
+        Ok(format!("{prefix}{:04}", max + 1))
     }
 
     pub fn rejections(&self) -> Result<Vec<Rejection>> {
@@ -388,6 +410,23 @@ mod tests {
         assert_eq!(back, r);
         assert_eq!(ledger.live().unwrap().len(), 1);
         assert!(ledger.path("../x").is_err());
+    }
+
+    #[test]
+    fn personal_stores_number_their_own_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = Ledger::in_store(dir.path(), ingrain_core::Store::Global);
+        assert_eq!(global.next_id().unwrap(), "G-0001");
+        let r = Record {
+            id: "G-0001".into(),
+            decision: "Prefer early returns.".into(),
+            status: Status::Accepted,
+            ..Default::default()
+        };
+        r.save(&global.path("G-0001").unwrap()).unwrap();
+        assert_eq!(global.next_id().unwrap(), "G-0002");
+        let local = Ledger::in_store(&dir.path().join("l"), ingrain_core::Store::Local);
+        assert_eq!(local.next_id().unwrap(), "L-0001");
     }
 
     #[test]

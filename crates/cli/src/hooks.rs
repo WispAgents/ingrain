@@ -9,6 +9,49 @@ fn guarded(event: &str) -> String {
     format!("command -v ingrain >/dev/null 2>&1 && ingrain hook {event} || true")
 }
 
+/// For your own Claude Code settings (`~/.claude/settings.json`), which run in every repository:
+/// like the plugin's hooks, they act only in repositories set up for ingrain (a global decision
+/// counts) and step aside where the repository's own settings run ingrain.
+fn guarded_user(event: &str) -> String {
+    format!("command -v ingrain >/dev/null 2>&1 && ingrain hook {event} --from-plugin || true")
+}
+
+/// Which Claude Code settings file to install into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settings {
+    /// `.claude/settings.json`: committed, shared with the team.
+    Project,
+    /// `.claude/settings.local.json`: this checkout only.
+    Local,
+    /// `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`): every repository.
+    User,
+}
+
+/// Your Claude Code settings directory.
+pub fn claude_home() -> Option<std::path::PathBuf> {
+    let var = |name: &str| {
+        std::env::var_os(name)
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute())
+    };
+    var("CLAUDE_CONFIG_DIR").or_else(|| {
+        var("HOME")
+            .or_else(|| var("USERPROFILE"))
+            .map(|h| h.join(".claude"))
+    })
+}
+
+/// True when Claude Code settings enable the ingrain plugin, whose hooks already run everywhere.
+pub fn enables_plugin(settings: &Value) -> bool {
+    settings["enabledPlugins"]
+        .as_object()
+        .is_some_and(|plugins| {
+            plugins.iter().any(|(name, on)| {
+                name.split('@').next() == Some("ingrain") && on.as_bool() == Some(true)
+            })
+        })
+}
+
 /// The Claude Code hook events ingrain answers, with their tool matcher.
 /// Bash is included: shell commands can write files too.
 pub const TOOLS: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash";
@@ -72,7 +115,15 @@ pub enum Outcome {
 
 /// Merge ingrain's hooks into `.claude/settings.json`, keeping everything else.
 pub fn install_claude(root: &Path) -> Result<Outcome> {
-    let path = root.join(".claude").join("settings.json");
+    install_claude_in(
+        &root.join(".claude").join("settings.json"),
+        Settings::Project,
+    )
+}
+
+/// Merge ingrain's hooks into the settings file at `path`, keeping everything else.
+pub fn install_claude_in(path: &Path, kind: Settings) -> Result<Outcome> {
+    let path = path.to_path_buf();
     let mut settings: Value = if path.exists() {
         let text = std::fs::read_to_string(&path)?;
         serde_json::from_str(&text)
@@ -80,6 +131,12 @@ pub fn install_claude(root: &Path) -> Result<Outcome> {
     } else {
         json!({})
     };
+    if kind == Settings::User && enables_plugin(&settings) {
+        return Ok(Outcome::Skipped(
+            "the ingrain Claude Code plugin is enabled and already runs the hooks everywhere"
+                .into(),
+        ));
+    }
     let Some(obj) = settings.as_object_mut() else {
         return Ok(Outcome::Skipped(format!(
             "{} is not a JSON object",
@@ -89,7 +146,11 @@ pub fn install_claude(root: &Path) -> Result<Outcome> {
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
     let mut changed = remove_legacy(hooks)?;
     for (event, matcher, name) in EVENTS {
-        changed |= add_hook(hooks, event, *matcher, &guarded(name))?;
+        let command = match kind {
+            Settings::User => guarded_user(name),
+            Settings::Project | Settings::Local => guarded(name),
+        };
+        changed |= add_hook(hooks, event, *matcher, &command)?;
     }
     if !changed {
         return Ok(Outcome::AlreadyPresent);
@@ -165,6 +226,33 @@ fn add_hook(hooks: &mut Value, event: &str, matcher: Option<&str>, command: &str
     Ok(true)
 }
 
+/// Add `pattern` to `.git/info/exclude` unless git already ignores `rel`, so a personal file
+/// never shows up as untracked. True when it was added.
+pub fn exclude(git: &ingrain_core::Git, rel: &str, pattern: &str) -> Result<bool> {
+    if git
+        .try_run(&["check-ignore", "-q", "--no-index", "--", rel])
+        .is_some()
+    {
+        return Ok(false);
+    }
+    let path = git.common_dir().join("info").join("exclude");
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    if current.lines().any(|l| l.trim() == pattern) {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(path.parent().expect("has parent"))?;
+    let sep = if current.is_empty() || current.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    std::fs::write(
+        &path,
+        format!("{current}{sep}# ingrain --local\n{pattern}\n"),
+    )?;
+    Ok(true)
+}
+
 /// The hooks directory git actually runs: `core.hooksPath` when set, and the main repository's
 /// `.git/hooks` from a linked worktree.
 pub fn hooks_dir(git: &ingrain_core::Git) -> Result<std::path::PathBuf> {
@@ -228,6 +316,44 @@ mod tests {
         assert_eq!(v["model"], "x");
         assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 2);
         assert_eq!(v["hooks"]["PostToolUse"][0]["matcher"], TOOLS);
+    }
+
+    #[test]
+    fn user_settings_step_aside_for_the_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert_eq!(
+            install_claude_in(&path, Settings::User).unwrap(),
+            Outcome::Installed
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("ingrain hook pre-tool-use --from-plugin"),
+            "{text}"
+        );
+        assert_eq!(
+            install_claude_in(&path, Settings::User).unwrap(),
+            Outcome::AlreadyPresent
+        );
+
+        let with_plugin = dir.path().join("p.json");
+        std::fs::write(
+            &with_plugin,
+            r#"{"enabledPlugins":{"ingrain@ingrain":true}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            install_claude_in(&with_plugin, Settings::User).unwrap(),
+            Outcome::Skipped(_)
+        ));
+        // Local settings get the plain hooks.
+        let local = dir.path().join("settings.local.json");
+        install_claude_in(&local, Settings::Local).unwrap();
+        let text = std::fs::read_to_string(&local).unwrap();
+        assert!(
+            text.contains("ingrain hook stop") && !text.contains("--from-plugin"),
+            "{text}"
+        );
     }
 
     #[test]

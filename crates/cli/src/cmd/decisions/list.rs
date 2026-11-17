@@ -8,7 +8,14 @@ use std::process::ExitCode;
 
 pub fn list(dir: &Path, all: bool) -> Outcome {
     let repo = Repo::open(dir)?;
-    for r in repo.ledger.records()? {
+    let records = repo.all_records()?;
+    let mut pending = Vec::new();
+    if all {
+        for ledger in repo.ledgers() {
+            pending.extend(ledger.pending()?);
+        }
+    }
+    for r in records {
         match r.status {
             Status::Accepted => println!("{}", r.line()),
             Status::Superseded if all => println!(
@@ -19,20 +26,16 @@ pub fn list(dir: &Path, all: bool) -> Outcome {
             _ => {}
         }
     }
-    if all {
-        for r in repo.ledger.pending()? {
-            println!("{} [proposed]", r.line());
-        }
+    for r in pending {
+        println!("{} [proposed]", r.line());
     }
     Ok(ExitCode::SUCCESS)
 }
 
 pub fn show(dir: &Path, id: &str) -> Outcome {
     let repo = Repo::open(dir)?;
-    let record = repo
-        .ledger
-        .get(id)
-        .or_else(|_| repo.ledger.get_pending(id))?;
+    let ledger = repo.ledger_of(id);
+    let record = ledger.get(id).or_else(|_| ledger.get_pending(id))?;
     print!("{}", serde_yaml::to_string(&record)?);
     Ok(ExitCode::SUCCESS)
 }
@@ -40,7 +43,7 @@ pub fn show(dir: &Path, id: &str) -> Outcome {
 pub fn for_path(dir: &Path, path: &Path, as_json: bool) -> Outcome {
     let repo = Repo::open(dir)?;
     let rel = repo.git.relative(path);
-    let records = repo.ledger.live()?;
+    let records = repo.decisions()?;
     let content = repo.read(&rel);
     let found = scope::applicable(&records, &rel, content.as_deref());
     if as_json {

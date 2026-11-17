@@ -68,10 +68,10 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     // one change can't retire a decision or rule (or ignore its path) and break it. By hand, the
     // working tree counts.
     let decisions = match (&base, base.before_rev(&repo.git)) {
-        (DiffBase::Head, _) | (_, None) => repo.ledger.live()?,
+        (DiffBase::Head, _) | (_, None) => repo.decisions()?,
         (_, Some(rev)) => {
             repo.pin_to(&rev)?;
-            repo.ledger.live_at(&repo.git, &rev)?
+            repo.decisions_at(&rev)?
         }
     };
     let rules = repo.compiled_rules()?;

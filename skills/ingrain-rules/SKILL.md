@@ -23,6 +23,11 @@ it as a decision with `ingrain-decide`. Use this skill to find the rules nobody 
 A single correction is enough to propose a rule. Every proposal still has to pass the backtest,
 and the user reviews each one, so expect some one-off fixes among them: reject those with a reason.
 
+Rules go to the repository's `.corrections/rules/` by default. To keep them for the user only, put
+`--local` (this repository, `.git/ingrain/local/`) or `--global` (every repository,
+`~/.config/ingrain/`) right after `ingrain` on `propose`, `review`, `accept`, `reject`, `mode` and
+`promote`: `ingrain --global rules propose`. Checks and hooks run rules from all three stores.
+
 ## 1. Capture corrections
 
 ```sh

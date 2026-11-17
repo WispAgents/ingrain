@@ -25,6 +25,10 @@ npx skills add WispAgents/ingrain
 | `ingrain-decide` | "From now on we don't use X": record, change or look up a decision |
 | `ingrain-rules` | Learn rules from past corrections, review them, set shadow / warn / block |
 
-The plugin's hooks act only in repos set up with `ingrain init`, and step aside where the repo's
+Ask for **"use ingrain just for me"** to get `ingrain init --local` (nothing committed). Ask to
+"always" follow a rule in every repo to get a `--global` decision
+([local and global stores](guide/personal-stores.md)).
+
+The plugin's hooks act only in repos set up with `ingrain init` (or that see your global decisions), and step aside where the repo's
 own `.claude/settings.json` already runs ingrain (no double checks). Without the `ingrain` binary
 they do nothing. Agents without hooks get an ingrain section in AGENTS.md (`ingrain init --agents-md`) and are caught by pre-commit and CI.

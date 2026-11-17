@@ -30,6 +30,9 @@ Setting up a repo (for coding agents):
 Until that first commit, ingrain's hooks let the agent accept and commit, when each runs as its
 own command (no `cd`, variables or other programs in it); after it, agents only propose
 (`ingrain decisions add --propose`, `ingrain decisions supersede`) and a person accepts.
+Just for the user, nothing committed: `ingrain init --local` (this repo, .git/ingrain/local) or
+`ingrain init --global` (every repo, ~/.config/ingrain); then `ingrain --local|--global decisions
+add --propose ...`. A person accepts; there is no first-setup exception for personal stores.
 Guide: https://github.com/WispAgents/ingrain/blob/main/skills/ingrain-setup/SKILL.md";
 
 #[derive(Parser)]
@@ -38,13 +41,21 @@ struct Cli {
     /// Repository to work on (defaults to the current directory).
     #[arg(long, global = true, value_name = "DIR")]
     repo: Option<std::path::PathBuf>,
+    /// Keep decisions and rules for this repository only, inside `.git/`: never committed.
+    #[arg(long, global = true, conflicts_with = "global")]
+    local: bool,
+    /// Keep decisions and rules for every repository on this machine (`~/.config/ingrain`,
+    /// or `$INGRAIN_HOME`).
+    #[arg(long, global = true)]
+    global: bool,
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create .corrections/ and decisions/, and install the Claude Code and git hooks.
+    /// Create .corrections/ and decisions/, and install the Claude Code and git hooks
+    /// (`--local`: for you only, nothing committed; `--global`: for every repository).
     Init(cmd::init::Args),
     /// Check added lines against learned rules and decisions (pre-commit, CI).
     Check(cmd::check::Args),
@@ -94,6 +105,11 @@ fn main() -> ExitCode {
     }
     let cli = Cli::parse();
     let dir = cli.repo.unwrap_or_else(|| std::path::PathBuf::from("."));
+    if cli.local {
+        repo::choose_store(ingrain_core::Store::Local);
+    } else if cli.global {
+        repo::choose_store(ingrain_core::Store::Global);
+    }
     let result = match cli.command {
         Command::Init(args) => cmd::init::run(&dir, args),
         Command::Check(args) => cmd::check::run(&dir, args),

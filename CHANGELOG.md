@@ -6,8 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-17
+
 ### Added
 
+- Personal stores, never written to the working tree. `--local` keeps decisions (`L-0001`) and
+  learned rules in `.git/ingrain/local/` for one repository. `--global` keeps them (`G-0001`) in
+  `~/.config/ingrain/` (`$INGRAIN_HOME`) for every repository. `ingrain init --local` puts the
+  hooks in `.claude/settings.local.json` (git-excluded). `ingrain init --global` puts them in
+  `~/.claude/settings.json` as plugin-style hooks. Hooks and `ingrain check` read all stores.
+  Agents are kept out of personal stores the same way, with no first-setup exception.
 - Docs site: an mdBook in `docs/book/`, deployed to GitHub Pages from `main`, with a CLI
   reference generated from the binary by the hidden `ingrain --markdown-help` flag.
 
@@ -83,7 +91,8 @@ All notable changes to this project are documented here. The format follows
 - First release: learn lint rules from human corrections of agent code, enforce them in Claude Code
   hooks, pre-commit and CI. Prebuilt binaries and a GitHub Action.
 
-[Unreleased]: https://github.com/WispAgents/ingrain/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/WispAgents/ingrain/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/WispAgents/ingrain/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/WispAgents/ingrain/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/WispAgents/ingrain/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/WispAgents/ingrain/compare/v0.2.1...v0.2.2

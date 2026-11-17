@@ -20,6 +20,10 @@ person runs `ingrain decisions review`. To see what applies to a file before edi
 A glob scope matches the path; a bare directory means everything under it. A symbol matches files
 whose path names it or whose content mentions it. No scope, or `**`, is repo-wide.
 
+To keep a decision for yourself instead of committing it, write it to a personal store:
+`ingrain --local decisions add …` (this repo, ids `L-`) or `ingrain --global decisions add …`
+(every repo, ids `G-`). See [local and global stores](personal-stores.md).
+
 To change one: `ingrain decisions supersede D-0002 --decision "..." --reason "..."`, then
 `ingrain decisions review`. The old decision stays in force until a person accepts the new one.
 

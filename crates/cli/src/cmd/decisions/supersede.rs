@@ -24,7 +24,9 @@ pub struct Args {
 
 pub fn run(dir: &Path, args: Args) -> Outcome {
     let repo = Repo::open(dir)?;
-    let old = repo.ledger.get(&args.id)?;
+    // The proposal goes to the store of the decision it replaces.
+    let ledger = repo.ledger_of(&args.id);
+    let old = ledger.get(&args.id)?;
     if !old.is_live() {
         bail!(
             "{} is already superseded by {}",
@@ -45,9 +47,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
     // Reviving a rejected alternative (or keeping the wording) un-rejects it.
     rejected.retain(|r| r.trim() != decision);
     let record = Record {
-        id: repo
-            .ledger
-            .fresh_pending_id(&format!("{}\0{}", old.id, args.decision))?,
+        id: ledger.fresh_pending_id(&format!("{}\0{}", old.id, args.decision))?,
         decision,
         reason: args.reason.trim().to_owned(),
         rejected,
@@ -67,7 +67,7 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         date: today(),
         ..Default::default()
     };
-    let path = repo.ledger.pending_path(&record.id)?;
+    let path = ledger.pending_path(&record.id)?;
     record.save(&path)?;
     println!(
         "proposed {} to replace {}: {}",
