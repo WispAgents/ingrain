@@ -34,6 +34,7 @@ Guide: https://github.com/WispAgents/ingrain/blob/main/skills/ingrain-setup/SKIL
 * `check` — Check added lines against learned rules and decisions (pre-commit, CI)
 * `decisions` — The decision ledger: record, extract, review, supersede and list decisions
 * `rules` — Learned lint rules: mine corrections, propose, review, promote and evaluate rules
+* `viewer` — Open the desktop viewer: review proposals, read decisions and rules with their history (`--local` / `--global`: only that store)
 * `hook` — Claude Code hook entry point (reads the hook JSON on stdin)
 
 **Options:**
@@ -410,6 +411,24 @@ Time-split evaluation: learn from older corrections, score on newer ones
   Default value: `10`
 * `--min-corrections <MIN_CORRECTIONS>` — Corrections of the same pattern needed before a rule is proposed (default: `min_support` in .corrections/config.yml, 1 unless set). Raise it for fewer, better-supported rules
 * `--json <JSON>` — Write the full report as JSON
+
+
+
+## `ingrain viewer`
+
+Open the desktop viewer: review proposals, read decisions and rules with their history (`--local` / `--global`: only that store)
+
+**Usage:** `ingrain viewer [OPTIONS] [PATH]`
+
+**Arguments:**
+
+* `<PATH>` — A folder inside the repository to open (default: the current directory, or `--repo`)
+* `<RUNE>` — Rune's own flags for headless runs (`-- --snap out.png --scene timeline`); implies `--wait`
+
+**Options:**
+
+* `--select <ID>` — Open on this item, e.g. `D-0004` or a rule id
+* `--wait` — Keep the terminal until the window closes
 
 
 

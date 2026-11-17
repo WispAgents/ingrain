@@ -62,6 +62,9 @@ ingrain rules reject <id> --reason "<why>"       # never proposed again
 
 Accepted rules start in **shadow** mode: hits are logged, nothing is shown or blocked.
 
+The user can also review proposals in the desktop viewer: `ingrain viewer` opens its inbox, with
+each rule's example fix and backtest.
+
 ## 4. Tighten over time
 
 ```sh

@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.3.0
+      - uses: WispAgents/ingrain/action@v0.4.0
 ```
 
 The action runs `ingrain check --diff base...HEAD --format github`: hits become annotations on the

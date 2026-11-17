@@ -27,7 +27,7 @@ Run `ingrain --version`. If it works and prints 0.3.0 or later, go to step 2.
 Otherwise ask the user, then install it with the first option that applies:
 
 - macOS or Linux with Homebrew (`brew --version`): `brew install wispagents/tap/ingrain`
-- Rust available (`cargo --version`): `cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.3.0 ingrain`
+- Rust available (`cargo --version`): `cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.4.0 ingrain`
 - Otherwise download the archive for this platform from https://github.com/WispAgents/ingrain/releases/latest
   and put the binary on the PATH:
   - macOS / Linux: `ingrain-<version>-<target>.tar.gz` (`aarch64-apple-darwin`, `x86_64-apple-darwin`,
@@ -109,7 +109,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.3.0
+      - uses: WispAgents/ingrain/action@v0.4.0
 ```
 
 ## 5. Commit on a branch
@@ -123,4 +123,5 @@ open a PR unless the user asks.
 Pick a file a decision covers and run `ingrain decisions for <path>`. Then tell the user, briefly:
 how many decisions are live, which ones block, and how to add more (the `ingrain-decide` skill, or
 `ingrain decisions add --propose "..."`). Learned rules come later, from corrections: see the
-`ingrain-rules` skill.
+`ingrain-rules` skill. If the user wants to browse or review them in a window, tell them about
+`ingrain viewer` (the desktop viewer).

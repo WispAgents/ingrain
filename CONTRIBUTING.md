@@ -31,11 +31,14 @@ Crates:
 | `crates/engine` | ast-grep matching |
 | `crates/learn` | Capture, clustering, rule writing, backtest, eval |
 | `crates/ledger` | Decisions, scope, checks, extraction |
-| `crates/cli` | The `ingrain` binary, hooks, end-to-end tests |
+| `crates/cli` | The `ingrain` binary, hooks, the desktop viewer (`src/viewer/`), end-to-end tests |
 
 ## Before you push
 
-CI runs these on Linux, macOS and Windows, so run them locally first:
+CI runs these on Linux, macOS and Windows, so run them locally first. On Linux, install the
+viewer's build libraries once: `sudo apt-get install libxkbcommon-dev libwayland-dev` (Fedora:
+`libxkbcommon-devel wayland-devel`). The viewer needs Rust 1.99; the CLI alone builds on 1.90
+with `--no-default-features`, which CI also checks.
 
 ```sh
 cargo fmt --all --check

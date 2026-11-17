@@ -48,7 +48,7 @@ can't be edited by agents, and are checked together by `ingrain check`, the pre-
 ```sh
 brew install wispagents/tap/ingrain   # macOS and Linux
 # or from source, any OS:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.3.0 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.4.0 ingrain
 ```
 
 Prebuilt binaries for macOS, Linux and Windows (x64 and arm64) are on the
@@ -110,6 +110,36 @@ ingrain rules review                        # accept / edit / reject
 
 git commit decisions/ .corrections/ -m "ingrain rules"
 ```
+
+## See it: the viewer
+
+`ingrain viewer` opens a desktop app on the repository you are in. Use it to read what was decided
+and why, review proposals, and see how things changed.
+
+![The viewer's inbox](docs/book/src/images/viewer/inbox.png)
+
+- **Inbox**: proposals one at a time. `A` accepts, `R` rejects with a reason, `J` skips.
+- **Decisions**: each one with why, what was not chosen, where it applies, the check that enforces
+  it, where it was decided, what it replaced, and its git history with each change's diff.
+- **Learned rules**: set the mode (shadow, warn, block), see hits per week, overrides, the fix the
+  rule learned from and its backtest.
+- **Timeline**: every decision by month. Replaced ones are struck through and point to the new one.
+- **Applies to…**: type a path, or drop a file on the window, to see what an agent gets for it.
+- **Stores**: project, local and global decisions and rules show together, tagged; the sidebar
+  filters by store once you have personal ones.
+- Open it from anywhere: `ingrain viewer ~/code/app`; outside a repository it lists your recent
+  ones. `ingrain --global viewer` shows only your personal rules. Drop a folder on the window to
+  open it.
+
+The window updates by itself when files change. Every change it makes (accept, reject, supersede,
+mode) runs `ingrain`'s own commands, so it does exactly what they do. It is part of the `ingrain`
+binary, built with [Rune](https://github.com/anomalyco/rune); `ingrain viewer` returns at once and
+the window keeps running (`--wait` keeps the terminal until it closes).
+
+On Linux, the prebuilt binaries leave the viewer out, so `ingrain` runs in any container or CI
+image with nothing extra installed. For the viewer on a Linux desktop, build from source (Rust 1.99
+or newer, plus `libxkbcommon-dev` and `libwayland-dev`):
+`cargo install --locked --git https://github.com/WispAgents/ingrain ingrain`.
 
 ## Just for you: local and global stores
 
@@ -274,6 +304,7 @@ later corrected (at least 3, and half of all hits, per the mined corrections); `
 | `check [paths] [--staged \| --diff RANGE] [--format text\|json\|github]` | Rules and decisions on added lines |
 | `decisions add \| extract \| review \| accept \| reject \| supersede \| list \| show \| for \| stale` | The decision ledger |
 | `rules mine \| propose [--explain] [--min-corrections N] \| review \| accept \| reject \| list \| mode \| promote \| eval` | Learned rules |
+| `viewer [path] [--select ID] [--wait]` | Open the desktop viewer (`--global viewer`: your personal rules) |
 | `hook <session-start\|pre-tool-use\|post-tool-use\|stop>` | Claude Code hook entry point |
 
 ## CI
@@ -287,7 +318,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.3.0
+      - uses: WispAgents/ingrain/action@v0.4.0
 ```
 
 ## Layout
@@ -314,6 +345,11 @@ cargo test --all --locked
 Crates: `core` (data model, rule files, git), `engine` (ast-grep), `learn` (capture, cluster, rule
 writing, backtest, eval), `ledger` (decisions, scope, checks, extraction), `cli` (the `ingrain`
 binary). [PLAN.md](PLAN.md) is the working plan.
+
+The viewer is `crates/cli/src/viewer/`, behind the default `viewer` feature: it needs Rust 1.99
+(Rune) and, on Linux, `libxkbcommon-dev` and `libwayland-dev`. `--no-default-features` builds the
+CLI alone, on Rust 1.90. `python3 scripts/viewer-demo-repo.py /tmp/harbor` builds a
+demo repository to try it on; [docs/viewer/PLAN.md](docs/viewer/PLAN.md) has its user stories.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR, [SECURITY.md](SECURITY.md) to report a
 vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release notes. This project follows a

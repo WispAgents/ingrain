@@ -12,6 +12,12 @@ repository.workspace = true
 name = "ingrain"
 path = "src/main.rs"
 
+[features]
+default = ["viewer"]
+# `ingrain viewer`, the desktop window (Rune). Needs Rust 1.99, and on Linux links libxkbcommon and
+# libwayland-client, so Linux release builds leave it out (`--no-default-features`) and run anywhere.
+viewer = ["dep:rune", "dep:rune-kit", "dep:rune-theme-opencode"]
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
@@ -24,6 +30,9 @@ ingrain-core.workspace = true
 ingrain-engine.workspace = true
 ingrain-learn.workspace = true
 ingrain-ledger.workspace = true
+rune = { workspace = true, optional = true }
+rune-kit = { workspace = true, optional = true }
+rune-theme-opencode = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

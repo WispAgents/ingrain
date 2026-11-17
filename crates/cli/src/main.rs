@@ -11,6 +11,8 @@ mod hooks;
 mod overrides;
 mod repo;
 mod session;
+#[cfg(feature = "viewer")]
+mod viewer;
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
@@ -69,6 +71,9 @@ enum Command {
         #[command(subcommand)]
         command: cmd::rules::Command,
     },
+    /// Open the desktop viewer: review proposals, read decisions and rules with their history
+    /// (`--local` / `--global`: only that store).
+    Viewer(cmd::viewer::Args),
     /// Claude Code hook entry point (reads the hook JSON on stdin).
     Hook {
         event: cmd::hook::Event,
@@ -116,6 +121,16 @@ fn main() -> ExitCode {
         Command::Decisions { command } => cmd::decisions::run(&dir, command),
         Command::Hook { event, from_plugin } => cmd::hook::run(&dir, event, from_plugin),
         Command::Rules { command } => cmd::rules::run(&dir, command),
+        Command::Viewer(args) => {
+            let only = if cli.local {
+                Some(cmd::viewer::Only::Local)
+            } else if cli.global {
+                Some(cmd::viewer::Only::Global)
+            } else {
+                None
+            };
+            cmd::viewer::run(&dir, only, args)
+        }
     };
     match result {
         Ok(code) => code,
