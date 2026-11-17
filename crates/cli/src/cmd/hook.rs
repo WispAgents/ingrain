@@ -67,8 +67,7 @@ fn plugin_steps_aside(dir: &Path, payload: &Value) -> bool {
             return true;
         }
     };
-    let set_up = repo.layout.corrections_dir().is_dir() || !repo.ledger.live_lenient().is_empty();
-    if !set_up {
+    if !repo.is_set_up() {
         return true;
     }
     // Claude Code reads settings from the project dir it was started in, which in a monorepo
@@ -101,8 +100,14 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
     let mut first_setup = false;
     if let Event::PreToolUse = event {
         let git = ingrain_core::Git::open(dir)?;
+        // Personal stores never reach git, so there is no first setup to let through.
+        if let Some(rel) = edited_file(payload).and_then(|f| bash::personal_reviewed_file(&git, f))
+        {
+            return Ok(Some(deny(reviewed_message(&rel))));
+        }
         if let Some(rel) = edited_path(&git, payload)
             && bash::is_reviewed_file(&rel)
+            && project_set_up(&git)
             && !is_first_setup(&git)
         {
             return Ok(Some(deny(reviewed_message(&rel))));
@@ -129,7 +134,7 @@ pub fn handle(dir: &Path, event: Event, payload: &Value) -> Result<Option<Value>
     let mut session = Session::load(&sessions, session_id);
     let tool_use_id = payload["tool_use_id"].as_str().map(str::to_owned);
 
-    let decisions = repo.ledger.live_lenient();
+    let decisions = repo.decisions_lenient();
     let answer = match event {
         Event::SessionStart => {
             // Remember a ledger committed outside agent sessions before an agent can hide it.
@@ -476,12 +481,28 @@ const SETUP_HINT: &str = " ingrain is being set up in this repository (no decisi
      through without asking when run as their own command: no `cd` elsewhere, `--repo`, \
      variables, or other programs in the same call. Run them that way.";
 
+/// The repository itself chose ingrain: `.corrections/` or a live decision in `decisions/`. A
+/// repo that only sees the user's global decisions keeps its own `decisions/` folder (ADRs) free.
+fn project_set_up(git: &ingrain_core::Git) -> bool {
+    git.root()
+        .join(ingrain_core::layout::CORRECTIONS_DIR)
+        .is_dir()
+        || !ingrain_ledger::Ledger::new(git.root())
+            .live_lenient()
+            .is_empty()
+}
+
 /// No decision, rule or ingrain config was ever committed: ingrain is being set up. The
 /// repository's history (every ref, so other branches and worktrees count) is read, not just
 /// `HEAD`, so resetting or checking out an older commit doesn't reopen setup; nor does a
 /// nested repository (`git init` in a subfolder, a submodule) inside one that has a ledger.
 fn is_first_setup(git: &ingrain_core::Git) -> bool {
-    if ledger_committed(git) {
+    // Personal stores are never committed, so no setup commit would review what an agent
+    // accepts there: once one is in use (or `init --local` made one), setup is over.
+    if ledger_committed(git)
+        || crate::repo::personal_in_use(git)
+        || ingrain_core::layout::local_dir(git).is_dir()
+    {
         return false;
     }
     let mut outer: Vec<std::path::PathBuf> =
@@ -562,13 +583,18 @@ fn deny(reason: String) -> Value {
         "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason } })
 }
 
+/// The file an edit targets, as the tool gave it.
+fn edited_file(payload: &Value) -> Option<&Path> {
+    let input = &payload["tool_input"];
+    input["file_path"]
+        .as_str()
+        .or_else(|| input["notebook_path"].as_str())
+        .map(Path::new)
+}
+
 /// The repo-relative path an edit targets; `None` for files outside the repository.
 fn edited_path(git: &ingrain_core::Git, payload: &Value) -> Option<String> {
-    let input = &payload["tool_input"];
-    let file = input["file_path"]
-        .as_str()
-        .or_else(|| input["notebook_path"].as_str())?;
-    git.relative_in_repo(Path::new(file))
+    git.relative_in_repo(edited_file(payload)?)
 }
 
 fn session_start(decisions: &[Record], session: &mut Session, payload: &Value) -> Option<Value> {

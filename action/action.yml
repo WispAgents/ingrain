@@ -6,7 +6,7 @@ inputs:
     default: ${{ github.event.pull_request.base.sha }}
   version:
     description: Release of WispAgents/ingrain to use.
-    default: v0.2.4
+    default: v0.3.0
 runs:
   using: composite
   steps:

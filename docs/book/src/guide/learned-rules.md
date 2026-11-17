@@ -20,3 +20,7 @@ repeat. Accepted rules start in shadow mode; `ingrain rules promote` moves them 
 from their hit log. Shadow hits are invisible to the agent, so leaving shadow needs hits a human
 later corrected (at least 3, and half of all hits, per the mined corrections); `ingrain rules mode
 <id> warn` moves one by hand. `ingrain rules eval` measures the whole loop on your history.
+
+Accepted rules go to `.corrections/rules/`. Add `--local` or `--global` (`ingrain --global rules
+propose`) to keep them in a [personal store](personal-stores.md) instead; checks and hooks run the
+rules from every store.

@@ -48,7 +48,7 @@ can't be edited by agents, and are checked together by `ingrain check`, the pre-
 ```sh
 brew install wispagents/tap/ingrain   # macOS and Linux
 # or from source, any OS:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.4 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.3.0 ingrain
 ```
 
 Prebuilt binaries for macOS, Linux and Windows (x64 and arm64) are on the
@@ -110,6 +110,47 @@ ingrain rules review                        # accept / edit / reject
 
 git commit decisions/ .corrections/ -m "ingrain rules"
 ```
+
+## Just for you: local and global stores
+
+Decisions and rules don't have to be committed. Two personal stores sit next to the project's
+`decisions/` and `.corrections/`, and are never written to the working tree:
+
+| Store | Where | Applies to | Decision ids |
+|---|---|---|---|
+| project (default) | `decisions/`, `.corrections/` | the repository, shared with the team | `D-0001` |
+| `--local` | `.git/ingrain/local/` | this repository, for you only | `L-0001` |
+| `--global` | `~/.config/ingrain/` (`$INGRAIN_HOME`, `$XDG_CONFIG_HOME/ingrain`, `%APPDATA%\ingrain`) | every repository on this machine | `G-0001` |
+
+```sh
+# Use ingrain in a repo without committing anything
+ingrain init --local      # .git/ingrain/local/, hooks in .claude/settings.local.json (git-excluded)
+ingrain decisions add "Use the fetch wrapper, not axios." --forbid-dep axios   # → L-0001
+
+# Your own rules, everywhere
+ingrain init --global     # ~/.config/ingrain/, hooks in ~/.claude/settings.json ($CLAUDE_CONFIG_DIR)
+ingrain --global decisions add "Prefer early returns over nested ifs."        # → G-0001
+ingrain --global rules propose                                                 # learned rules go there too
+```
+
+Hooks, `ingrain check`, `decisions for` and `decisions list` read all three stores together.
+`--local` / `--global` pick where new decisions and rules are written; without a flag, writes go to
+the project store when the repo has `decisions/` or `.corrections/`, else to the local store once
+`ingrain init --local` ran. `supersede`, `accept`, `reject` and `show` find the store from the id.
+
+- The hooks `init --global` adds to your Claude Code settings work like the plugin's: they answer
+  only in repositories set up for ingrain (any global decision counts) and step aside where the
+  repository's own settings run ingrain. They aren't added when that settings file enables the
+  ingrain plugin; if you enable the plugin elsewhere, pass `--no-claude`.
+- Personal stores aren't in git, so the pre-commit check reads them as they are (the project's
+  decisions are still read from the base revision), and CI never sees them. `init --local` installs
+  the pre-commit hook in that repository; `init --global` installs it only in the repository you run
+  it from, if any, so elsewhere global decisions are enforced by the Claude Code hooks alone.
+- A repository that only sees your global decisions keeps its own `decisions/` folder editable.
+- Agents can't edit accepted files in personal stores, accept proposals there, or run
+  `init --local` / `init --global` without asking you; they propose, and you accept. There is no
+  first-setup exception for personal stores.
+- `$INGRAIN_HOME` and `$XDG_CONFIG_HOME` must be absolute paths; relative ones are ignored.
 
 ## What the agent sees (Claude Code)
 
@@ -228,7 +269,8 @@ later corrected (at least 3, and half of all hits, per the mined corrections); `
 
 | | |
 |---|---|
-| `init` | Create `decisions/` and `.corrections/`, install hooks |
+| `init [--local \| --global]` | Create `decisions/` and `.corrections/` (or a personal store), install hooks |
+| `--local`, `--global` | Before any command: write to the local or global store instead of the project's |
 | `check [paths] [--staged \| --diff RANGE] [--format text\|json\|github]` | Rules and decisions on added lines |
 | `decisions add \| extract \| review \| accept \| reject \| supersede \| list \| show \| for \| stale` | The decision ledger |
 | `rules mine \| propose [--explain] [--min-corrections N] \| review \| accept \| reject \| list \| mode \| promote \| eval` | Learned rules |
@@ -245,7 +287,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.2.4
+      - uses: WispAgents/ingrain/action@v0.3.0
 ```
 
 ## Layout
@@ -257,6 +299,8 @@ decisions/pending/         proposed decisions          gitignored
 .corrections/pending/      proposed rules              gitignored
 .corrections/config.yml    thresholds, agent markers   committed
 .git/ingrain/              corrections, hit logs, hook sessions, extraction state (local)
+.git/ingrain/local/        --local store: decisions/L-NNNN.yml, corrections/rules/ (never committed)
+~/.config/ingrain/         --global store: decisions/G-NNNN.yml, corrections/rules/ (every repo)
 ```
 
 ## Development

@@ -13,6 +13,7 @@
 - [Decisions or learned rules?](guide/decisions-vs-rules.md)
 - [Decisions](guide/decisions.md)
 - [Learned rules](guide/learned-rules.md)
+- [Just for you: local and global stores](guide/personal-stores.md)
 - [What the agent sees](guide/hooks.md)
 - [Where checks run](guide/checks.md)
 - [CI](guide/ci.md)

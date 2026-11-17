@@ -22,12 +22,15 @@ Setting up a repo (for coding agents):
 Until that first commit, ingrain's hooks let the agent accept and commit, when each runs as its
 own command (no `cd`, variables or other programs in it); after it, agents only propose
 (`ingrain decisions add --propose`, `ingrain decisions supersede`) and a person accepts.
+Just for the user, nothing committed: `ingrain init --local` (this repo, .git/ingrain/local) or
+`ingrain init --global` (every repo, ~/.config/ingrain); then `ingrain --local|--global decisions
+add --propose ...`. A person accepts; there is no first-setup exception for personal stores.
 Guide: https://github.com/WispAgents/ingrain/blob/main/skills/ingrain-setup/SKILL.md
 ```
 
 **Subcommands:**
 
-* `init` — Create .corrections/ and decisions/, and install the Claude Code and git hooks
+* `init` — Create .corrections/ and decisions/, and install the Claude Code and git hooks (`--local`: for you only, nothing committed; `--global`: for every repository)
 * `check` — Check added lines against learned rules and decisions (pre-commit, CI)
 * `decisions` — The decision ledger: record, extract, review, supersede and list decisions
 * `rules` — Learned lint rules: mine corrections, propose, review, promote and evaluate rules
@@ -36,18 +39,20 @@ Guide: https://github.com/WispAgents/ingrain/blob/main/skills/ingrain-setup/SKIL
 **Options:**
 
 * `--repo <DIR>` — Repository to work on (defaults to the current directory)
+* `--local` — Keep decisions and rules for this repository only, inside `.git/`: never committed
+* `--global` — Keep decisions and rules for every repository on this machine (`~/.config/ingrain`, or `$INGRAIN_HOME`)
 
 
 
 ## `ingrain init`
 
-Create .corrections/ and decisions/, and install the Claude Code and git hooks
+Create .corrections/ and decisions/, and install the Claude Code and git hooks (`--local`: for you only, nothing committed; `--global`: for every repository)
 
 **Usage:** `ingrain init [OPTIONS]`
 
 **Options:**
 
-* `--no-claude` — Don't touch .claude/settings.json
+* `--no-claude` — Don't touch the Claude Code settings
 * `--no-git-hook` — Don't install the git pre-commit hook
 * `--agents-md` — Also add an ingrain section to AGENTS.md, for agents that read it but run no hooks (Codex, Cursor, Copilot…)
 

@@ -11,6 +11,6 @@ pub mod store;
 
 pub use config::Config;
 pub use git::{DiffBase, Git};
-pub use layout::Layout;
+pub use layout::{Layout, Store};
 pub use model::{AgentHunk, CorrectedLines, Correction, LineRange, Snippet, Source};
 pub use rulefile::{Backtest, Example, IngrainMeta, Mode, RuleFile};

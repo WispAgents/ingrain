@@ -19,4 +19,7 @@ ingrain rules review                        # accept / edit / reject
 git commit decisions/ .corrections/ -m "ingrain rules"
 ```
 
+Just for you, with nothing committed: `ingrain init --local`, or `ingrain init --global` for
+decisions that follow you into every repo. See [local and global stores](guide/personal-stores.md).
+
 Next: [what the agent sees](guide/hooks.md) once ingrain is set up, and [where checks run](guide/checks.md).

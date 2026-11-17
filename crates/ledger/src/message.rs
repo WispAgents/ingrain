@@ -3,6 +3,14 @@
 use crate::check::Violation;
 use crate::record::Record;
 
+/// `L-` and `G-` ids: the user's own decisions, kept out of the repository.
+fn is_personal(id: &str) -> bool {
+    id.starts_with("L-") || id.starts_with("G-")
+}
+
+const PERSONAL: &str = "L- and G- ids are the user's personal decisions (this repository only, and every \
+     repository), kept outside the repository; follow them like the others.\n";
+
 /// Decisions that apply to a file the agent is about to edit.
 pub fn scoped(path: &str, records: &[&Record], more: usize) -> String {
     let mut s = format!(
@@ -15,6 +23,9 @@ pub fn scoped(path: &str, records: &[&Record], more: usize) -> String {
         s.push_str(&format!(
             "({more} more: run `ingrain decisions for {path}`)\n"
         ));
+    }
+    if records.iter().any(|r| is_personal(&r.id)) {
+        s.push_str(PERSONAL);
     }
     s.push_str(HOW_TO_CHANGE);
     s
@@ -34,9 +45,14 @@ pub fn session(records: &[&Record], scoped_count: usize, more: usize) -> String 
     if scoped_count > 0 {
         s.push_str(&format!("{scoped_count} more decisions apply to specific files; they're shown when you edit those files.\n"));
     }
+    if records.iter().any(|r| is_personal(&r.id)) {
+        s.push_str(PERSONAL);
+    }
     s.push_str(
         "When the user states a lasting decision (a convention, constraint, or choice future code must follow), \
-         record it for review: `ingrain decisions add --propose \"<decision>\" --reason \"<why>\" --scope <glob>`.\n",
+         record it for review: `ingrain decisions add --propose \"<decision>\" --reason \"<why>\" --scope <glob>` \
+         (add `--global` when it's the user's own preference for every repository, `--local` for this one \
+         repository without committing it).\n",
     );
     s.push_str(HOW_TO_CHANGE);
     s

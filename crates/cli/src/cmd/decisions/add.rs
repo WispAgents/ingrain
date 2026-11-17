@@ -89,9 +89,8 @@ pub fn run(dir: &Path, args: Args) -> Outcome {
         record.id = repo.ledger.next_id()?;
         let path = repo.ledger.path(&record.id)?;
         record.save(&path)?;
-        let rel = repo.git.relative(&path);
-        repo.git.run(&["add", "--", &rel])?;
-        println!("added {} → {} (staged)", record.id, path.display());
+        let staged = if repo.stage(&path)? { " (staged)" } else { "" };
+        println!("added {} → {}{staged}", record.id, path.display());
     }
     Ok(ExitCode::SUCCESS)
 }

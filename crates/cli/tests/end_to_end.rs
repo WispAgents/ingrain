@@ -47,6 +47,10 @@ fn ingrain_stdin(dir: &Path, args: &[&str], stdin: &str) -> Output {
         .args(args)
         .current_dir(dir)
         .env("HOME", dir.join(".home")) // no real transcripts
+        // The global store comes from HOME; a developer's own must not leak in.
+        .env_remove("INGRAIN_HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

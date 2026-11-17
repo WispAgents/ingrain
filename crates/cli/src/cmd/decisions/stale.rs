@@ -11,7 +11,7 @@ const OFTEN_OVERRIDDEN: usize = 3;
 
 pub fn run(dir: &Path) -> Outcome {
     let repo = Repo::open(dir)?;
-    let records = repo.ledger.records()?;
+    let records = repo.all_records()?;
     let files: Vec<String> = repo
         .git
         .run(&["ls-files"])?

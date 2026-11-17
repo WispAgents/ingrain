@@ -17,6 +17,93 @@ pub fn is_reviewed_file(rel: &str) -> bool {
         || rel == ".corrections/rejected.yml"
 }
 
+/// A reviewed file in a personal store (`--local`, `--global`): `decisions/*.yml`,
+/// `corrections/rules/*.yml`, `corrections/config.yml` or `corrections/rejected.yml` under the
+/// store's directory. Returns the path relative to the store.
+pub fn personal_reviewed_file(git: &Git, file: &Path) -> Option<String> {
+    let file = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        git.root().join(file)
+    };
+    let stores = [
+        Some(ingrain_core::layout::local_dir(git)),
+        ingrain_core::layout::global_dir(),
+    ];
+    let file = lexical(&file);
+    stores.into_iter().flatten().find_map(|base| {
+        let base = lexical(&base);
+        // Compare resolved paths too: `/tmp` vs `/private/tmp`, symlinked homes, folders that
+        // don't exist yet.
+        let rel = file
+            .strip_prefix(&base)
+            .ok()
+            .map(Path::to_path_buf)
+            .or_else(|| {
+                resolved(&file)
+                    .strip_prefix(resolved(&base))
+                    .ok()
+                    .map(Path::to_path_buf)
+            })?;
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        let as_project = match rel.strip_prefix("corrections/") {
+            Some(rest) => format!(".corrections/{rest}"),
+            None => rel.clone(),
+        };
+        is_reviewed_file(&as_project).then_some(rel)
+    })
+}
+
+/// `a/b/../c` → `a/c`, `a/./b` → `a/b`, without touching the file system.
+fn lexical(path: &Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// `path` with its nearest existing ancestor canonicalized (symlinks resolved).
+fn resolved(path: &Path) -> std::path::PathBuf {
+    let mut rest = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(c) = std::fs::canonicalize(cur) {
+            let mut out =
+                std::path::PathBuf::from(ingrain_core::git::normalize_path(&c.to_string_lossy()));
+            out.extend(rest.iter().rev());
+            return out;
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_owned());
+                cur = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// A word naming a personal store: `.git/ingrain/local`, `~/.config/ingrain`, `$INGRAIN_HOME`,
+/// or anything with `ingr` and a glob or variable in it (`~/.config/ingr*`, `$X/ingrain/…`).
+fn names_personal_store(w: &str) -> bool {
+    w.contains("ingrain/local")
+        || w.contains(".config/ingrain")
+        || w.contains("ingrain_home")
+        || (w.contains("ingr") && w.contains(['*', '?', '[', '$', '{']))
+        || ingrain_core::layout::global_dir().is_some_and(|g| {
+            let g = g.to_string_lossy().to_lowercase().replace('\\', "/");
+            w.contains(g.trim_end_matches('/'))
+        })
+}
+
 /// Programs that only read. A command that mentions a reviewed path is let through only when
 /// every program in it is one of these (without their writing options) and nothing is
 /// redirected into a reviewed path.
@@ -230,9 +317,21 @@ pub fn setup_command(command: &str, root: &Path) -> bool {
     };
     // `NAME=value` (a prefix or `export`): git's own variables can point it at another
     // repository or turn hooks off.
+    // Nor can the variables that pick ingrain's personal store or the Claude Code settings.
     let assignment_ok = |w: &str| {
-        w.split_once('=')
-            .is_some_and(|(name, _)| !name.to_ascii_uppercase().starts_with("GIT_"))
+        w.split_once('=').is_some_and(|(name, _)| {
+            let name = name.to_ascii_uppercase();
+            !name.starts_with("GIT_")
+                && !matches!(
+                    name.as_str(),
+                    "INGRAIN_HOME"
+                        | "XDG_CONFIG_HOME"
+                        | "HOME"
+                        | "USERPROFILE"
+                        | "APPDATA"
+                        | "CLAUDE_CONFIG_DIR"
+                )
+        })
     };
     let root_dir = std::fs::canonicalize(root).ok();
     // Backticks in a single-quoted message are text.
@@ -271,7 +370,10 @@ pub fn setup_command(command: &str, root: &Path) -> bool {
             let rest = &args[1.min(args.len())..];
             let allowed = match program {
                 "" => true,
-                "ingrain" => !rest.iter().any(|w| w.starts_with("--repo")),
+                // Personal stores are never committed, so no setup commit reviews them.
+                "ingrain" => !rest.iter().any(|w| {
+                    w.starts_with("--repo") || matches!(w.as_str(), "--local" | "--global")
+                }),
                 "git" => {
                     // `--no-pager` is the only global option; no `-C`, `-c`, `--git-dir`.
                     let words: Vec<&String> = rest
@@ -404,6 +506,12 @@ pub fn skips_verification(command: &str) -> Option<String> {
 /// A word that names `decisions/` or `.corrections/` outside their proposal folders.
 fn is_protected(word: &str) -> bool {
     let w = word.to_lowercase().replace('\\', "/");
+    if names_personal_store(&w) {
+        let free = !w.contains("..")
+            && (w.contains("decisions/pending") || w.contains("corrections/pending"))
+            && !w.contains(' ');
+        return !free;
+    }
     if w.contains("decisions/") || w.contains(".corrections") {
         // Only `pending/` proposals are free, and only without `..` tricks.
         let free = !w.contains("..")
@@ -578,6 +686,7 @@ fn global_options<S: AsRef<str>>(args: &[S]) -> usize {
         match w {
             "--repo" => i += 2,
             w if w.starts_with("--repo=") => i += 1,
+            "--local" | "--global" => i += 1,
             _ => break,
         }
     }
@@ -588,12 +697,15 @@ fn global_options<S: AsRef<str>>(args: &[S]) -> usize {
 fn ledger_command(words: &[&str]) -> Option<String> {
     let at = words.iter().position(|w| base_name(w) == "ingrain")?;
     // `--repo` is global: it may come before or after the subcommand.
+    let personal = words[at + 1..]
+        .iter()
+        .any(|w| matches!(*w, "--local" | "--global"));
     let mut rest: Vec<&str> = Vec::new();
     let mut args = words[at + 1..].iter();
     while let Some(w) = args.next() {
         if *w == "--repo" {
             args.next();
-        } else if !w.starts_with("--repo=") {
+        } else if !w.starts_with("--repo=") && !matches!(*w, "--local" | "--global") {
             rest.push(w);
         }
     }
@@ -607,6 +719,8 @@ fn ledger_command(words: &[&str]) -> Option<String> {
             "add" => !rest.contains(&"--propose"),
             _ => false,
         },
+        // Personal init writes Claude Code settings outside the repository.
+        "init" => personal,
         "rules" => match sub {
             "accept" | "reject" | "review" | "mode" => true,
             "promote" => rest.contains(&"--apply"),

@@ -22,12 +22,12 @@ committing or pushing.
 
 ## 1. Make sure the `ingrain` binary is installed
 
-Run `ingrain --version`. If it works and prints 0.2.4 or later, go to step 2.
+Run `ingrain --version`. If it works and prints 0.3.0 or later, go to step 2.
 
 Otherwise ask the user, then install it with the first option that applies:
 
 - macOS or Linux with Homebrew (`brew --version`): `brew install wispagents/tap/ingrain`
-- Rust available (`cargo --version`): `cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.4 ingrain`
+- Rust available (`cargo --version`): `cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.3.0 ingrain`
 - Otherwise download the archive for this platform from https://github.com/WispAgents/ingrain/releases/latest
   and put the binary on the PATH:
   - macOS / Linux: `ingrain-<version>-<target>.tar.gz` (`aarch64-apple-darwin`, `x86_64-apple-darwin`,
@@ -47,6 +47,19 @@ This creates `decisions/` and `.corrections/`, adds ingrain's hooks to `.claude/
 (they do nothing for teammates who don't have ingrain), installs a git pre-commit hook, and adds an
 ingrain section to `AGENTS.md` for agents that don't run hooks (Codex, Cursor, Copilot…). Drop
 `--agents-md` if the user doesn't want AGENTS.md touched.
+
+### Just for the user: `--local` and `--global`
+
+If the user wants ingrain for themselves without committing anything to the repo, run
+`ingrain init --local` instead: decisions and rules go to `.git/ingrain/local/` (ids `L-0001`), the
+hooks to `.claude/settings.local.json` (excluded from git), and nothing lands in the working tree.
+Skip steps 4 and 5 (no CI, nothing to commit). In step 3, proposals land in
+`.git/ingrain/local/decisions/pending/`, and there is no first-setup exception: Claude Code asks
+the user to approve `ingrain decisions accept` (and `init --local` itself), or the user runs it. For rules the user wants in every repository, run
+`ingrain init --global` (store in `~/.config/ingrain/`, ids `G-0001`, hooks in
+`~/.claude/settings.json`) and record them with `ingrain --global decisions add …`. Hooks and
+`ingrain check` read the project, local and global stores together. If the ingrain plugin is
+enabled, add `--no-claude`: the plugin's hooks already cover every repository.
 
 ## 3. Seed decisions from what the team already wrote down
 
@@ -96,7 +109,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: WispAgents/ingrain/action@v0.2.4
+      - uses: WispAgents/ingrain/action@v0.3.0
 ```
 
 ## 5. Commit on a branch

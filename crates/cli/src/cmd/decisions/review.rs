@@ -10,11 +10,13 @@ use std::process::ExitCode;
 /// The new record is written before the old one is retired, so a failure halfway never
 /// leaves the ledger without the decision.
 pub fn accept(repo: &Repo, pending_id: &str) -> Result<String> {
-    let mut record = repo.ledger.get_pending(pending_id)?;
-    let pending_path = repo.ledger.pending_path(pending_id)?;
+    // A proposal is accepted into the store it was proposed in.
+    let ledger = repo.ledger_of(pending_id);
+    let mut record = ledger.get_pending(pending_id)?;
+    let pending_path = ledger.pending_path(pending_id)?;
     let old = match record.supersedes.clone() {
         Some(old_id) => {
-            let old = repo.ledger.get(&old_id).with_context(|| {
+            let old = ledger.get(&old_id).with_context(|| {
                 format!("{pending_id} supersedes {old_id}, which doesn't exist")
             })?;
             if !old.is_live() {
@@ -27,14 +29,14 @@ pub fn accept(repo: &Repo, pending_id: &str) -> Result<String> {
         }
         None => None,
     };
-    let id = repo.ledger.next_id()?;
+    let id = ledger.next_id()?;
     record.id = id.clone();
     record.status = Status::Accepted;
-    let path = repo.ledger.path(&id)?;
+    let path = ledger.path(&id)?;
     record.save(&path)?;
     let mut staged = vec![path.clone()];
     if let Some(mut old) = old {
-        let old_path = repo.ledger.path(&old.id)?;
+        let old_path = ledger.path(&old.id)?;
         old.status = Status::Superseded;
         old.superseded_by = Some(id.clone());
         if let Err(e) = old.save(&old_path) {
@@ -45,8 +47,7 @@ pub fn accept(repo: &Repo, pending_id: &str) -> Result<String> {
     }
     std::fs::remove_file(&pending_path)?;
     for p in staged {
-        let rel = repo.git.relative(&p);
-        repo.git.run(&["add", "--", &rel])?;
+        repo.stage(&p)?;
     }
     Ok(id)
 }
@@ -55,22 +56,31 @@ pub fn reject(repo: &Repo, pending_id: &str, reason: &str) -> Result<()> {
     if reason.trim().is_empty() {
         bail!("a reason is required");
     }
-    let record = repo.ledger.get_pending(pending_id)?;
-    repo.ledger.add_rejection(Rejection {
+    let ledger = repo.ledger_of(pending_id);
+    let record = ledger.get_pending(pending_id)?;
+    ledger.add_rejection(Rejection {
         decision: record.decision,
         reason: reason.trim().to_owned(),
     })?;
-    std::fs::remove_file(repo.ledger.pending_path(pending_id)?)?;
+    std::fs::remove_file(ledger.pending_path(pending_id)?)?;
     Ok(())
 }
 
 pub fn accept_cmd(dir: &Path, ids: &[String]) -> Outcome {
     let repo = Repo::open(dir)?;
+    let mut project = false;
     for p in ids {
         let id = accept(&repo, p)?;
-        println!("accepted {p} as {id} (staged)");
+        if ingrain_core::Store::of_id(&id) == Some(ingrain_core::Store::Project) {
+            project = true;
+            println!("accepted {p} as {id} (staged)");
+        } else {
+            println!("accepted {p} as {id} (personal: stays out of git)");
+        }
     }
-    println!("commit decisions/ to share them with your team and CI");
+    if project {
+        println!("commit decisions/ to share them with your team and CI");
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -83,7 +93,10 @@ pub fn reject_cmd(dir: &Path, id: &str, reason: &str) -> Outcome {
 
 pub fn interactive(dir: &Path) -> Outcome {
     let repo = Repo::open(dir)?;
-    let pending = repo.ledger.pending()?;
+    let mut pending = Vec::new();
+    for ledger in repo.ledgers() {
+        pending.extend(ledger.pending()?);
+    }
     if pending.is_empty() {
         println!("nothing to review");
         return Ok(ExitCode::SUCCESS);
@@ -145,7 +158,14 @@ pub fn card(repo: &Repo, r: &Record) -> String {
 }
 
 fn card_text(repo: &Repo, r: &Record) -> String {
-    let mut s = format!("{}  ({:?})\n  {}\n", r.id, r.category, r.decision);
+    let store = repo.ledger_of(&r.id).store;
+    let mut s = format!(
+        "{}  ({:?}, {} store)\n  {}\n",
+        r.id,
+        r.category,
+        store.name(),
+        r.decision
+    );
     if !r.reason.is_empty() {
         s.push_str(&format!("  why: {}\n", r.reason));
     }
@@ -160,7 +180,7 @@ fn card_text(repo: &Repo, r: &Record) -> String {
     s.push_str(&format!("  scope: {scope}\n"));
     if let Some(old) = &r.supersedes {
         let text = repo
-            .ledger
+            .ledger_of(old)
             .get(old)
             .map(|o| o.decision)
             .unwrap_or_else(|_| "(missing)".into());
@@ -197,7 +217,7 @@ fn read_line(input: &mut impl BufRead) -> Result<Option<String>> {
 
 /// Edit the proposal in $EDITOR; it must still parse. The id is kept.
 fn edit(repo: &Repo, id: &str) -> Result<()> {
-    let path = repo.ledger.pending_path(id)?;
+    let path = repo.ledger_of(id).pending_path(id)?;
     ingrain_core::process::edit(&path)?;
     let mut r = Record::load(&path).context("the edited proposal doesn't parse")?;
     if r.id != id {

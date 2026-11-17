@@ -119,7 +119,7 @@ pub fn promote(dir: &Path, apply: bool) -> Outcome {
     let stats = hitlog::stats_confirmed(&repo.layout.hits_file(), &corrections)?;
     let mut changes = Vec::new();
     let mut held = Vec::new();
-    for rule in repo.accepted()? {
+    for rule in repo.accepted_here()? {
         let s = stats.get(&rule.id).cloned().unwrap_or_default();
         match suggest(
             rule.meta.mode,

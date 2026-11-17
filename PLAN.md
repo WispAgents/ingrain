@@ -196,3 +196,10 @@ Goal: a developer adds ingrain to their agent and repo in one or two commands.
   ref; live headless runs: 6/6 setups accepted and committed with no refusals.
 - History rule: reviewed files that match history a command moved through (checkout, merge, rebase,
   fetched remotes, stash, in-progress operations) aren't tampering; rewinds and new content are.
+
+# v0.3.0: personal stores (local and global)
+
+- `--local` (`.git/ingrain/local/`, `L-` ids) and `--global` (`~/.config/ingrain/`, `G-` ids) keep
+  decisions and learned rules out of the working tree; hooks and checks read all three stores.
+- Personal stores get the same agent protections, with no first-setup exception; broken personal
+  files are skipped so they can't fail checks in every repository.

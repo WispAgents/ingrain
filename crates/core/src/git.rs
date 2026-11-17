@@ -108,6 +108,20 @@ impl Git {
         &self.git_dir
     }
 
+    /// The repository's shared `.git` directory: for a linked worktree, the main one's (read
+    /// from `<git dir>/commondir`, so no extra spawn).
+    pub fn common_dir(&self) -> PathBuf {
+        match std::fs::read_to_string(self.git_dir.join("commondir")) {
+            Ok(rel) if !rel.trim().is_empty() => {
+                let dir = self.git_dir.join(rel.trim());
+                std::fs::canonicalize(&dir)
+                    .map(|d| PathBuf::from(normalize_path(&d.to_string_lossy())))
+                    .unwrap_or(dir)
+            }
+            _ => self.git_dir.clone(),
+        }
+    }
+
     pub fn has_head(&self) -> bool {
         self.try_run(&["rev-parse", "--verify", "-q", "HEAD"])
             .is_some()

@@ -35,7 +35,9 @@ pub fn accept(dir: &Path, ids: &[String]) -> Outcome {
         let path = accept_one(&repo, id)?;
         println!("accepted {id} → {} (mode: shadow)", path.display());
     }
-    println!("commit .corrections/rules/ to share the rules with your team and CI");
+    if repo.store == ingrain_core::Store::Project {
+        println!("commit .corrections/rules/ to share the rules with your team and CI");
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -48,10 +50,14 @@ fn accept_one(repo: &Repo, id: &str) -> Result<std::path::PathBuf> {
     if dest.exists() {
         bail!("an accepted rule `{id}` already exists");
     }
+    if repo.accepted()?.iter().any(|r| r.id == *id) {
+        bail!(
+            "another store (project, local or global) already has a rule `{id}`; rename this one"
+        );
+    }
     rule.save(&dest)?;
     std::fs::remove_file(&pending_path)?;
-    let rel = repo.git.relative(&dest);
-    repo.git.run(&["add", "--", &rel])?;
+    repo.stage(&dest)?;
     Ok(dest)
 }
 

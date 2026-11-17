@@ -3,7 +3,7 @@
 ```sh
 brew install wispagents/tap/ingrain   # macOS and Linux
 # or from source, any OS:
-cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.2.4 ingrain
+cargo install --locked --git https://github.com/WispAgents/ingrain --tag v0.3.0 ingrain
 ```
 
 Prebuilt binaries for macOS, Linux and Windows (x64 and arm64) are on the
