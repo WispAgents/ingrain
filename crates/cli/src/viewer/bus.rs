@@ -1,8 +1,8 @@
 //! Work off the UI thread: loading, git history, CLI runs and the file watcher. Workers push a
 //! [`Msg`] and wake the window; `poll` drains them on the UI thread.
 
-use crate::history::Commit;
-use crate::model::{Source, Workspace};
+use crate::viewer::history::Commit;
+use crate::viewer::model::{Source, Workspace};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

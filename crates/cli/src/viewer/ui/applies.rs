@@ -2,7 +2,7 @@
 //! Drop a file on the window to ask about it.
 
 use super::style;
-use crate::app::{App, Sel, row_key};
+use crate::viewer::app::{App, Sel, row_key};
 use ingrain_ledger::scope::Match;
 use rune::{Color, El, ScrollSpec, Tx, col, el, row, text};
 use rune_kit::{Kit, TextInput};

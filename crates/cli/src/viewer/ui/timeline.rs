@@ -2,8 +2,8 @@
 //! stick while their month scrolls. Superseded ones are hollow and point at what replaced them.
 
 use super::{list, style};
-use crate::app::{App, Sel, row_key};
-use crate::model;
+use crate::viewer::app::{App, Sel, row_key};
+use crate::viewer::model;
 use rune::{Color, El, ScrollSpec, col, el, row, text};
 use rune_kit::Kit;
 

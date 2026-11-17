@@ -32,9 +32,9 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: CLI reference is up to date
         run: |
-          cargo run -q --locked -p ingrain -- --markdown-help > docs/book/src/reference/cli.md
+          cargo run -q --locked -p ingrain --no-default-features -- --markdown-help > docs/book/src/reference/cli.md
           git diff --exit-code -- docs/book/src/reference/cli.md \
-            || { echo "::error::Regenerate it: cargo run -q -p ingrain -- --markdown-help > docs/book/src/reference/cli.md"; exit 1; }
+            || { echo "::error::Regenerate it: cargo run -q -p ingrain --no-default-features -- --markdown-help > docs/book/src/reference/cli.md"; exit 1; }
       - run: mdbook build docs/book
       - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5

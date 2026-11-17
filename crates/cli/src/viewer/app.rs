@@ -1,9 +1,9 @@
 //! The viewer's state and what its handlers do.
 
-use crate::actions::{self, recents};
-use crate::bus::{Bus, Msg};
-use crate::history::{self, Commit};
-use crate::model::{Source, Workspace};
+use crate::viewer::actions::{self, recents};
+use crate::viewer::bus::{Bus, Msg};
+use crate::viewer::history::{self, Commit};
+use crate::viewer::model::{Source, Workspace};
 use ingrain_core::{Mode, Store};
 use ingrain_ledger::record::Category;
 use rune::{TextEdit, Tx};
@@ -118,6 +118,8 @@ pub struct App {
     pub toasts: Vec<Toast>,
     pub next_toast: u64,
     pub drop_over: bool,
+    /// The global store's folder (`~/.config/ingrain`, `$INGRAIN_HOME`), read once.
+    pub home_dir: Option<PathBuf>,
     /// Proposals taken out of the inbox before their command finished, by the command's label:
     /// a reload that read the files before the CLI wrote them must not bring them back.
     pub hidden: Vec<(String, Sel)>,
@@ -130,19 +132,22 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> App {
-        App::with_args(rune::extra_args())
+    /// The app as these arguments open it (`--repo`, `--store=local|global`, `--lens=`,
+    /// `--select=`, `--applies=`).
+    pub fn with_args(args: &[String]) -> App {
+        App::with_args_in(args, ingrain_core::layout::global_dir())
     }
 
-    /// The app as these arguments open it (`--repo`, `--personal`, `--lens=`, `--select=`, ...).
-    pub fn with_args(args: &[String]) -> App {
+    /// [`App::with_args`] with the global store (and the recents file) at `home`.
+    pub fn with_args_in(args: &[String], home: Option<PathBuf>) -> App {
         let dir = repo_arg(args).or_else(|| std::env::current_dir().ok());
         let mut app = App {
             bus: Bus::default(),
             source: None,
             ws: Workspace::default(),
             generation: 0,
-            recents: recents::load(),
+            recents: recents::load(home.as_deref()),
+            home_dir: home,
             home: true,
             lens: Lens::Decisions,
             sel: None,
@@ -167,16 +172,22 @@ impl App {
             spare_diff: DiffState::new(Vec::new()),
         };
         // The first window shows content, so this first load runs here, once.
-        let source = Source::open(dir.as_deref());
-        let personal = args.iter().any(|a| a == "--personal");
+        let source = Source::open_in(dir.as_deref(), app.home_dir.as_deref());
+        let only = match args.iter().find_map(|a| a.strip_prefix("--store=")) {
+            Some("local") => Some(Store::Local),
+            Some("global") => Some(Store::Global),
+            _ => None,
+        };
+        let personal = only == Some(Store::Global);
         if source.root.is_some() {
             let ws = source.load();
             app.open_source(source, ws);
-            if personal {
-                // `ingrain --global view` in a repository: its personal rules, which the CLI
-                // can still change from there.
-                app.store_filter = Some(Store::Global);
+            if only.is_some() {
+                // `ingrain --local viewer` / `--global viewer` in a repository: only that store,
+                // which the CLI can still change from there.
+                app.store_filter = only;
                 app.lens = Lens::Decisions;
+                app.ensure_selection();
             }
         } else {
             // Not in a repository: home, with the personal store behind it (read-only: the
@@ -235,7 +246,7 @@ impl App {
         self.store_filter = None;
         self.category_filter = None;
         if let Some(root) = &source.root {
-            recents::push(&mut self.recents, root);
+            recents::push(&mut self.recents, root, self.home_dir.as_deref());
         }
         self.generation = self.bus.watch(source.clone());
         self.source = Some(source);
@@ -254,8 +265,9 @@ impl App {
     /// Open the repository at or above `dir`, loading it on a worker.
     pub fn open_dir(&mut self, dir: &Path, _tx: &mut Tx) {
         let dir = dir.to_path_buf();
+        let home = self.home_dir.clone();
         self.bus.spawn(move |_| {
-            let source = Source::open(Some(&dir));
+            let source = Source::open_in(Some(&dir), home.as_deref());
             if source.root.is_none() {
                 return Some(Msg::Done {
                     label: "Not a git repository".into(),
@@ -270,8 +282,9 @@ impl App {
 
     /// The personal (global) store on its own, read-only.
     pub fn open_personal(&mut self) {
-        self.bus.spawn(|_| {
-            let source = Source::open(None);
+        let home = self.home_dir.clone();
+        self.bus.spawn(move |_| {
+            let source = Source::open_in(None, home.as_deref());
             let ws = source.load();
             Some(Msg::Opened { source, ws })
         });
@@ -304,8 +317,11 @@ impl App {
     pub fn applies(
         &self,
     ) -> (
-        Vec<(&crate::model::Decision, ingrain_ledger::scope::Match)>,
-        Vec<&crate::model::Rule>,
+        Vec<(
+            &crate::viewer::model::Decision,
+            ingrain_ledger::scope::Match,
+        )>,
+        Vec<&crate::viewer::model::Rule>,
     ) {
         let path = ingrain_core::git::normalize_path(self.applies.text.trim());
         let content = self
@@ -579,7 +595,7 @@ impl App {
         let label = label.into();
         if self.ws.root.is_none() {
             // The CLI opens a repository for every change, even to personal stores.
-            self.toast(false, "Open a repository to make changes", "Personal rules are read-only here; run `ingrain --global view` inside any repository.");
+            self.toast(false, "Open a repository to make changes", "Personal rules are read-only here; run `ingrain --global viewer` inside any repository.");
             return;
         }
         self.running.push(label.clone());
@@ -744,7 +760,7 @@ impl App {
         self.sheet = Some(Sheet::Log {
             title: "Extracting decisions".into(),
         });
-        let label = "Extraction finished".to_owned();
+        let label = EXTRACT.to_owned();
         if self.running.contains(&label) {
             return; // already running: the sheet shows its output
         }
@@ -763,7 +779,7 @@ impl App {
         self.sheet = Some(Sheet::Log {
             title: "Learning rules from corrections".into(),
         });
-        let label = "Rule proposals ready".to_owned();
+        let label = LEARN.to_owned();
         if self.running.contains(&label) {
             return;
         }
@@ -866,11 +882,16 @@ impl App {
                         self.hidden.remove(i);
                     }
                     if ok {
-                        // The CLI's own words say what happened ("accepted P-1 as D-0007"); the
-                        // label is the fallback for commands that print nothing.
-                        let mut lines = output.lines().filter(|l| !l.trim().is_empty());
-                        let title = lines.next().map(capitalize).unwrap_or(label);
-                        self.toast(true, title, lines.next().unwrap_or_default().to_owned());
+                        // A person knows what they just accepted or rejected: only a long job
+                        // finishing out of sight (its log closed) is worth saying.
+                        let long = label == EXTRACT || label == LEARN;
+                        if long && !matches!(self.sheet, Some(Sheet::Log { .. })) {
+                            let last = output
+                                .lines()
+                                .rfind(|l| !l.trim().is_empty())
+                                .unwrap_or_default();
+                            self.toast(true, label, last.to_owned());
+                        }
                     } else {
                         self.toast(
                             false,
@@ -896,12 +917,9 @@ impl App {
     }
 }
 
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    c.next()
-        .map(|f| f.to_uppercase().chain(c).collect())
-        .unwrap_or_default()
-}
+/// Labels of the long jobs, which say when they finish.
+const EXTRACT: &str = "Extraction finished";
+const LEARN: &str = "Rule proposals ready";
 
 pub fn row_key(sel: &Sel) -> String {
     match sel {
@@ -939,7 +957,6 @@ mod tests {
 
     #[test]
     fn every_lens_renders_and_a_click_selects() {
-        let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         assert!(
@@ -950,7 +967,6 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        unsafe { std::env::set_var("INGRAIN_HOME", root.join("home")) };
         write(
             &root.join("decisions/D-0001.yml"),
             "id: D-0001\ndecision: Use `apiClient`.\nstatus: accepted\nscope: ['src/**']\ndate: 2026-01-02\n",
@@ -964,7 +980,7 @@ mod tests {
             "id: P-1\ndecision: Prefer tabs.\nstatus: proposed\n",
         );
         let args = vec!["--repo".to_owned(), root.to_string_lossy().into_owned()];
-        let app = App::with_args(&args);
+        let app = App::with_args_in(&args, Some(root.join("home")));
         assert_eq!(
             app.lens,
             Lens::Inbox,
@@ -974,7 +990,7 @@ mod tests {
             system_dark: false,
             scale: 1.0,
         };
-        let mut rt = Runtime::new(app, crate::ui::view, (1180.0, 760.0), env);
+        let mut rt = Runtime::new(app, crate::viewer::ui::view, (1180.0, 760.0), env);
         rt.frame(0.0);
         assert!(
             rt.find("accept").is_some(),
@@ -1010,7 +1026,6 @@ mod tests {
 
     #[test]
     fn the_inbox_cursor_follows_its_item_and_supersede_needs_a_reason() {
-        let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         assert!(
@@ -1021,7 +1036,6 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        unsafe { std::env::set_var("INGRAIN_HOME", root.join("home")) };
         write(
             &root.join("decisions/D-0001.yml"),
             "id: D-0001\ndecision: Use tabs.\nstatus: accepted\n",
@@ -1034,7 +1048,10 @@ mod tests {
             &root.join("decisions/pending/P-c.yml"),
             "id: P-c\ndecision: C.\nstatus: proposed\n",
         );
-        let mut app = App::with_args(&["--repo".to_owned(), root.to_string_lossy().into_owned()]);
+        let mut app = App::with_args_in(
+            &["--repo".to_owned(), root.to_string_lossy().into_owned()],
+            Some(root.join("home")),
+        );
         app.inbox_at = 1;
         app.sel = None;
         app.ensure_selection();

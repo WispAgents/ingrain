@@ -9,7 +9,7 @@ mod sheets;
 pub mod style;
 mod timeline;
 
-use crate::app::{App, Lens};
+use crate::viewer::app::{App, Lens};
 use ingrain_core::Store;
 use rune::{Chrome, Cx, El, Icon, KeyEvent, Tx, col, el, row, text};
 use rune_kit::shell::{self, Sidebar, SidebarRow, SidebarToggle, SplitView, Toolbar};

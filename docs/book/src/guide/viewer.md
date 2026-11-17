@@ -1,6 +1,6 @@
 # The viewer
 
-`ingrain view` opens a desktop app on the repository you are in. It shows the same files the CLI
+`ingrain viewer` opens a desktop app on the repository you are in. It shows the same files the CLI
 reads: `decisions/`, `.corrections/`, your local and global stores, and the hit log.
 
 ![The viewer's inbox](../images/viewer/inbox.png)
@@ -8,15 +8,16 @@ reads: `decisions/`, `.corrections/`, your local and global stores, and the hit 
 ## Open it
 
 ```sh
-ingrain view                    # the repository you are in
-ingrain view ~/code/app         # another one
-ingrain view --select D-0004    # straight to one decision
-ingrain --global view           # only your personal rules
-ingrain-viewer                  # no repository: pick a recent one
+ingrain viewer                    # the repository you are in
+ingrain viewer ~/code/app         # another one
+ingrain viewer --select D-0004    # straight to one decision
+ingrain --global viewer           # only your personal rules
+ingrain viewer --wait             # keep the terminal until the window closes
 ```
 
-You can also press ⌘O to pick a folder, or drop a folder on the window. Outside a repository,
-`--global view` shows your personal rules read-only: the CLI makes changes from inside a
+`ingrain viewer` returns at once; the window keeps running. Run it outside a repository to pick a
+recent one. You can also press ⌘O to pick a folder, or drop a folder on the window. Outside a
+repository, `--global viewer` shows your personal rules read-only: the CLI makes changes from inside a
 repository, so open the viewer from one to accept or reject them.
 
 ## Review proposals
@@ -92,15 +93,14 @@ On Windows and Linux, ⌘ is Ctrl.
 ## How it works
 
 The viewer reads files with the same code as the CLI, on a background thread, and checks for
-changes every second. Every change it makes runs the `ingrain` CLI (found in `$INGRAIN_BIN`, next
-to the viewer, or on `PATH`), one at a time, so it does exactly what the commands do and nothing
+changes every second. Every change it makes runs `ingrain`'s own commands, one at a time, so it does exactly what the commands do and nothing
 more. A file that doesn't parse shows as a warning in the sidebar instead of disappearing.
 Sources open in your browser, or in their default app when they are documents or code inside the
 repository; nothing else opens.
 
-It is a separate program, `ingrain-viewer`, so the `ingrain` binary that runs in hooks and CI stays
-small. Install it with Rust 1.99 or newer:
+It is part of the `ingrain` binary: on macOS and Windows, installing ingrain installs it.
 
-```sh
-cargo install --locked --git https://github.com/WispAgents/ingrain ingrain-viewer
-```
+On Linux, the prebuilt binaries leave the viewer out, so `ingrain` runs in any container or CI
+image with nothing extra installed. For the viewer on a Linux desktop, build from source (Rust 1.99
+or newer, plus `libxkbcommon-dev` and `libwayland-dev`):
+`cargo install --locked --git https://github.com/WispAgents/ingrain ingrain`.

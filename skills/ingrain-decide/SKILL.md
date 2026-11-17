@@ -28,7 +28,7 @@ ingrain decisions list            # all live decisions
 ingrain decisions show D-0012     # one in full
 ```
 
-For the user, `ingrain view` opens the same decisions in a desktop window, with their history and
+For the user, `ingrain viewer` opens the same decisions in a desktop window, with their history and
 an inbox to accept or reject proposals. Suggest it to them; don't use it yourself.
 
 These include the user's personal decisions: `L-` ids (this repository only, kept in

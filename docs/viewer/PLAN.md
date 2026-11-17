@@ -17,8 +17,8 @@ learned rules. The CLI stays the engine; the viewer is a window onto the same fi
 
 Opening
 
-1. **O1** As a developer in a terminal, I run `ingrain view` in any folder of a repo and the viewer opens on that repo.
-2. **O2** As a developer anywhere, I run `ingrain view ~/code/x` (or just `ingrain-viewer`) and get the repo, or a home screen of recent repos when no path is given.
+1. **O1** As a developer in a terminal, I run `ingrain viewer` in any folder of a repo and the viewer opens on that repo.
+2. **O2** As a developer anywhere, I run `ingrain viewer ~/code/x` and get the repo, or a home screen of recent repos when I run it outside one.
 3. **O3** As a Finder user, I drop a folder on the window, or press ⌘O, to open a repo.
 4. **O4** As someone with only personal rules, I can browse my global store (`~/.config/ingrain`) without a repo.
 
@@ -59,14 +59,16 @@ Staying current
 
 ## How each is solved
 
-**Shape.** `viewer/` is its own Cargo workspace producing `ingrain-viewer`, depending on
-`ingrain-core` and `ingrain-ledger` by path for reading (same parsing, same scope matching).
-Every write goes through the `ingrain` CLI (`decisions accept|reject|supersede`,
-`rules accept|reject|mode`, `decisions extract`), so there is one implementation of each write
-and the viewer can never get the files subtly wrong. `ingrain view [PATH]` in the CLI finds
-`ingrain-viewer` next to itself or on `PATH` and starts it detached; if it isn't installed it
-says how to get it. Why separate: Rune needs Rust 1.99 and a GPU stack; the CLI runs in hooks
-and CI at MSRV 1.90 and must stay small (proposed as a decision, see below).
+**Shape.** The viewer is part of the `ingrain` binary (D-0001: one binary), in
+`crates/cli/src/viewer/`, reading with `ingrain-core` and `ingrain-ledger` (same parsing, same
+scope matching). Every write runs this same binary's commands (`decisions accept|reject|supersede`,
+`rules accept|reject|mode`, `decisions extract`), one at a time, so there is one implementation of
+each write and the viewer can never get the files subtly wrong. `ingrain viewer [PATH]` starts
+itself again in the background with `--wait` and returns. It is the default `viewer` Cargo
+feature: Rune needs Rust 1.99 (the CLI alone keeps 1.90, D-0033) and adds about 30 MB and 2.5 ms
+of startup. On Linux, Rune links libxkbcommon and libwayland-client, which would stop `ingrain`
+(hooks included) from starting on machines without them, so Linux release binaries are built
+without the feature; Linux desktop users build from source.
 
 **Window.** rune-kit's `SplitView`: sidebar (lenses), list, inspector (detail), on OpenCode's
 theme (Inter + IBM Plex Mono, light and dark follow the system).
@@ -80,7 +82,7 @@ theme (Inter + IBM Plex Mono, light and dark follow the system).
 
 | Story | Solution |
 | --- | --- |
-| O1, O2 | `ingrain view [PATH]` → `ingrain-viewer --repo <root>`; no path and no repo → Home with recents (`$INGRAIN_HOME/viewer.json`) |
+| O1, O2 | `ingrain viewer [PATH]` → the window on that repo; outside one → Home with recents (`$INGRAIN_HOME/viewer.json`) |
 | O3 | `on_drop_files` and `rune::file_dialog` folder picker, both resolve with `git rev-parse --show-toplevel` |
 | O4 | Global store loaded even without a repo; Home shows it |
 | U1, U4 | Decisions lens: filter field + store/category chips, list sorted by id |
@@ -103,8 +105,8 @@ Keyboard: `⌘1…6` lenses, `/` search, `↑↓` move, `⌘K` command palette o
 Editing a decision's text in place (the CLI's `supersede` is the safe path), multi-repo
 dashboards, Windows URL scheme registration, a signed `.app` bundle.
 
-## Decisions this needs
+## Decisions this follows
 
-- Propose: *Ship the desktop viewer as `ingrain-viewer` in its own `viewer/` workspace, started
-  by `ingrain view`; the `ingrain` binary stays free of GUI dependencies.* This refines D-0001
-  (single binary) and must be accepted by a person.
+- D-0001 (a single binary named `ingrain`): the viewer is a subcommand, not a second program.
+- D-0008 (the review prompt is line-based, no TUI framework): `decisions review` and `rules review`
+  stay as they are; the viewer is a separate, optional window.

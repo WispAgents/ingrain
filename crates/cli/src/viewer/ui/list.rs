@@ -2,8 +2,8 @@
 //! field and category filters.
 
 use super::style;
-use crate::app::{App, Lens, Sel, row_key};
-use crate::model::{self, Decision, Rule};
+use crate::viewer::app::{App, Lens, Sel, row_key};
+use crate::viewer::model::{self, Decision, Rule};
 use rune::{El, ScrollSpec, Tx, col, el, row, text};
 use rune_kit::{Kit, TextInput};
 use rune_theme_opencode::icons;

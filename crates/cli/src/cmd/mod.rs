@@ -5,7 +5,7 @@ pub mod decisions;
 pub mod hook;
 pub mod init;
 pub mod rules;
-pub mod view;
+pub mod viewer;
 
 use std::process::ExitCode;
 

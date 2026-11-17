@@ -3,9 +3,9 @@
 //! learned rule with its mode, the fix it learned from and how often it fires.
 
 use super::style;
-use crate::actions;
-use crate::app::{App, Sel};
-use crate::model::{self, Decision, Rule, WEEKS};
+use crate::viewer::actions;
+use crate::viewer::app::{App, Sel};
+use crate::viewer::model::{self, Decision, Rule, WEEKS};
 use ingrain_core::Mode;
 use ingrain_ledger::Status;
 use rune::{Color, El, ScrollSpec, Tx, col, el, row, text};
@@ -115,10 +115,7 @@ fn decision_actions(s: &App, k: &Kit, d: &Decision) -> El {
             "copy-line",
             &icons::COPY,
             "Copy the line agents get",
-            move |s: &mut App, tx| {
-                tx.copy(line.clone());
-                s.toast(true, "Copied", "The decision as agents see it");
-            },
+            move |_: &mut App, tx| tx.copy(line.clone()),
         ))
         .child(icon_action(
             k,
@@ -290,7 +287,7 @@ fn scope(k: &Kit, d: &Decision) -> El {
                         .to_owned();
                     s.applies = rune::TextEdit::new(path);
                     s.read_applies();
-                    s.set_lens(crate::app::Lens::Applies);
+                    s.set_lens(crate::viewer::app::Lens::Applies);
                 }),
         );
     }

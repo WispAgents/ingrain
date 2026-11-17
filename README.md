@@ -113,7 +113,7 @@ git commit decisions/ .corrections/ -m "ingrain rules"
 
 ## See it: the viewer
 
-`ingrain view` opens a desktop app on the repository you are in. Use it to read what was decided
+`ingrain viewer` opens a desktop app on the repository you are in. Use it to read what was decided
 and why, review proposals, and see how things changed.
 
 ![The viewer's inbox](docs/book/src/images/viewer/inbox.png)
@@ -127,17 +127,19 @@ and why, review proposals, and see how things changed.
 - **Applies to…**: type a path, or drop a file on the window, to see what an agent gets for it.
 - **Stores**: project, local and global decisions and rules show together, tagged; the sidebar
   filters by store once you have personal ones.
-- Open it from anywhere: `ingrain view ~/code/app`, or run `ingrain-viewer` and pick a recent
-  repository. `ingrain --global view` shows only your personal rules. Drop a folder on the
-  window to open it.
+- Open it from anywhere: `ingrain viewer ~/code/app`; outside a repository it lists your recent
+  ones. `ingrain --global viewer` shows only your personal rules. Drop a folder on the window to
+  open it.
 
 The window updates by itself when files change. Every change it makes (accept, reject, supersede,
-mode) runs the `ingrain` CLI, so it does exactly what the commands do. The viewer is a separate
-program built with [Rune](https://github.com/anomalyco/rune); install it with Rust 1.99 or newer:
+mode) runs `ingrain`'s own commands, so it does exactly what they do. It is part of the `ingrain`
+binary, built with [Rune](https://github.com/anomalyco/rune); `ingrain viewer` returns at once and
+the window keeps running (`--wait` keeps the terminal until it closes).
 
-```sh
-cargo install --locked --git https://github.com/WispAgents/ingrain ingrain-viewer
-```
+On Linux, the prebuilt binaries leave the viewer out, so `ingrain` runs in any container or CI
+image with nothing extra installed. For the viewer on a Linux desktop, build from source (Rust 1.99
+or newer, plus `libxkbcommon-dev` and `libwayland-dev`):
+`cargo install --locked --git https://github.com/WispAgents/ingrain ingrain`.
 
 ## Just for you: local and global stores
 
@@ -302,7 +304,7 @@ later corrected (at least 3, and half of all hits, per the mined corrections); `
 | `check [paths] [--staged \| --diff RANGE] [--format text\|json\|github]` | Rules and decisions on added lines |
 | `decisions add \| extract \| review \| accept \| reject \| supersede \| list \| show \| for \| stale` | The decision ledger |
 | `rules mine \| propose [--explain] [--min-corrections N] \| review \| accept \| reject \| list \| mode \| promote \| eval` | Learned rules |
-| `view [path] [--select ID]` | Open the desktop viewer (`--global view`: your personal rules) |
+| `viewer [path] [--select ID] [--wait]` | Open the desktop viewer (`--global viewer`: your personal rules) |
 | `hook <session-start\|pre-tool-use\|post-tool-use\|stop>` | Claude Code hook entry point |
 
 ## CI
@@ -344,9 +346,10 @@ Crates: `core` (data model, rule files, git), `engine` (ast-grep), `learn` (capt
 writing, backtest, eval), `ledger` (decisions, scope, checks, extraction), `cli` (the `ingrain`
 binary). [PLAN.md](PLAN.md) is the working plan.
 
-The viewer lives in `viewer/`, its own Cargo workspace (Rune needs a newer Rust than the CLI's
-MSRV): `cd viewer && cargo test`. `python3 viewer/scripts/demo-repo.py /tmp/harbor` builds a demo
-repository to try it on; [docs/viewer/PLAN.md](docs/viewer/PLAN.md) has its user stories.
+The viewer is `crates/cli/src/viewer/`, behind the default `viewer` feature: it needs Rust 1.99
+(Rune) and, on Linux, `libxkbcommon-dev` and `libwayland-dev`. `--no-default-features` builds the
+CLI alone, on Rust 1.90. `python3 scripts/viewer-demo-repo.py /tmp/harbor` builds a
+demo repository to try it on; [docs/viewer/PLAN.md](docs/viewer/PLAN.md) has its user stories.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR, [SECURITY.md](SECURITY.md) to report a
 vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release notes. This project follows a

@@ -104,7 +104,7 @@ pub fn category_chip(k: &Kit, category: Category) -> El {
         .fill(bg)
         .child(dot(mark, 6.0))
         .child(
-            text(crate::model::category_name(category))
+            text(crate::viewer::model::category_name(category))
                 .font(SMALL.lh(14.0))
                 .color(fg),
         )

@@ -195,13 +195,24 @@ pub struct Source {
 impl Source {
     /// The stores for the repository at (or above) `dir`; only the global store when `dir` is `None`
     /// or not in a repository.
-    pub fn open(dir: Option<&Path>) -> Source {
+    /// The global store is read from `home` (`ingrain_core::layout::global_dir()`, or a test's).
+    pub fn open_in(dir: Option<&Path>, home: Option<&Path>) -> Source {
         let git = dir.and_then(|d| Git::open(d).ok());
+        let global = |d: &Path| {
+            (
+                Store::Global,
+                d.to_path_buf(),
+                d.join("corrections").join("rules"),
+            )
+        };
         match git {
             Some(git) => {
                 let layers = Store::ALL
                     .into_iter()
                     .filter_map(|store| {
+                        if store == Store::Global {
+                            return home.map(global);
+                        }
                         let base = store.dir(&git)?;
                         let layout = Layout::for_store(&git, store).ok()?;
                         Some((store, base, layout.rules_dir()))
@@ -218,15 +229,7 @@ impl Source {
             None => Source {
                 root: None,
                 git_dir: None,
-                layers: ingrain_core::layout::global_dir()
-                    .map(|d| {
-                        vec![(
-                            Store::Global,
-                            d.clone(),
-                            d.join("corrections").join("rules"),
-                        )]
-                    })
-                    .unwrap_or_default(),
+                layers: home.map(global).into_iter().collect(),
                 hits: None,
             },
         }
@@ -302,7 +305,7 @@ impl Source {
             .cloned()
             .collect();
         for s in sources {
-            let target = crate::actions::source_target(self.root.as_deref(), &s);
+            let target = crate::viewer::actions::source_target(self.root.as_deref(), &s);
             ws.targets.insert(s, target);
         }
         ws
@@ -533,7 +536,6 @@ mod tests {
 
     #[test]
     fn loads_live_superseded_and_pending_with_lineage() {
-        let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = repo();
         let d = dir.path().join("decisions");
         write(
@@ -549,8 +551,7 @@ mod tests {
             "id: P-1\ndecision: Prefer tabs.\nstatus: proposed\n",
         );
         write(&d.join("broken.yml"), "decision: ''\n");
-        unsafe { std::env::set_var("INGRAIN_HOME", dir.path().join("home")) };
-        let ws = Source::open(Some(dir.path())).load();
+        let ws = Source::open_in(Some(dir.path()), Some(&dir.path().join("home"))).load();
         assert_eq!(ws.live().count(), 1);
         assert_eq!(ws.superseded().count(), 1);
         assert_eq!(ws.inbox_len(), 1);

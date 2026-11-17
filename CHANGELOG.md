@@ -8,12 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- `ingrain view`: a desktop viewer for decisions and learned rules (`ingrain-viewer`, built with
-  Rune, in `viewer/`). An inbox to accept or reject proposals by keyboard; a page per decision
+- `ingrain viewer`: a desktop viewer for decisions and learned rules, built into the binary with
+  Rune. An inbox to accept or reject proposals by keyboard; a page per decision
   with why, rejected options, scope, checks, sources, lineage and git history with diffs; rule
   modes, weekly hits and backtests; a timeline; and "applies to" for any path. Opens from any
   folder, a recent list, a folder dialog or a dropped folder, and updates when files change.
-  Every change runs the `ingrain` CLI.
+  Every change runs `ingrain`'s own commands. Project, local and global stores show together.
+
+- The viewer is the default `viewer` Cargo feature. The macOS and Windows binaries include it
+  (about 30 MB larger). The Linux binaries leave it out, so `ingrain` still runs in any container
+  or CI image. Building with the viewer needs Rust 1.99 and, on Linux, `libxkbcommon-dev` and
+  `libwayland-dev`; `--no-default-features` builds the CLI alone on Rust 1.90.
 
 ## [0.3.0] - 2026-11-17
 

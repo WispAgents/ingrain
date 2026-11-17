@@ -2,7 +2,7 @@
 //! a folder, or browse the personal rules kept for every repository.
 
 use super::style;
-use crate::app::App;
+use crate::viewer::app::App;
 use rune::{Color, El, ScrollSpec, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, Kit};
 use rune_theme_opencode::icons;

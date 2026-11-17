@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build a demo repository with decisions, proposals, learned rules and a hit log, for
-screenshots and trying the viewer: `python3 viewer/scripts/demo-repo.py /tmp/harbor`."""
+screenshots and trying the viewer: `python3 scripts/viewer-demo-repo.py /tmp/harbor`."""
 
 import json, os, shutil, subprocess, sys, time
 

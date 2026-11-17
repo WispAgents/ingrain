@@ -2,8 +2,8 @@
 //! (J / K). What's next waits in a queue underneath.
 
 use super::{detail, style};
-use crate::app::{App, Sel};
-use crate::model::{self, Decision, Rule};
+use crate::viewer::app::{App, Sel};
+use crate::viewer::model::{self, Decision, Rule};
 use rune::{El, ScrollSpec, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, TextInput};
 use rune_theme_opencode::icons;

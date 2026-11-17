@@ -20,8 +20,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # The viewer (Rune) links libxkbcommon and libwayland on Linux (Rune's README, "Linux").
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked -- -D warnings
+      # Linux release builds leave the viewer out: keep that build clean too.
+      - run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
       - run: cargo doc --workspace --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
@@ -37,6 +42,9 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # The viewer (Rune) links libxkbcommon and libwayland on Linux (Rune's README, "Linux").
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --all --locked
   msrv:
@@ -49,22 +57,9 @@ jobs:
         with:
           toolchain: "1.90"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --all-targets --locked
-  # The desktop viewer: its own workspace and toolchain (viewer/rust-toolchain.toml, which rustup
-  # installs on first use), so it never touches the CLI's MSRV.
-  viewer:
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: viewer
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: viewer
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
+      # The CLI keeps the MSRV (D-0033); the viewer feature needs Rust 1.99 (Rune) and is checked
+      # by the other jobs on stable.
+      - run: cargo check --workspace --all-targets --locked --no-default-features
   deny:
     runs-on: ubuntu-latest
     steps:
@@ -73,7 +68,7 @@ jobs:
   # Single required check for branch protection: passes only if every job above passed.
   ci-ok:
     if: always()
-    needs: [lint, test, msrv, deny, viewer]
+    needs: [lint, test, msrv, deny]
     runs-on: ubuntu-latest
     steps:
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

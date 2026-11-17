@@ -124,4 +124,4 @@ Pick a file a decision covers and run `ingrain decisions for <path>`. Then tell 
 how many decisions are live, which ones block, and how to add more (the `ingrain-decide` skill, or
 `ingrain decisions add --propose "..."`). Learned rules come later, from corrections: see the
 `ingrain-rules` skill. If the user wants to browse or review them in a window, tell them about
-`ingrain view` (the desktop viewer, installed separately as `ingrain-viewer`).
+`ingrain viewer` (the desktop viewer).

@@ -1,32 +1,17 @@
-//! Everything that changes files goes through the `ingrain` CLI, so the viewer never writes a
+//! Everything that changes files goes through the `ingrain` CLI (this binary, run again), so the viewer never writes a
 //! record or rule itself. Plus opening files, folders and links with the system.
 
-use crate::bus::{Bus, Msg};
+use crate::viewer::bus::{Bus, Msg};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// The CLI: `$INGRAIN_BIN`, else the `ingrain` next to this executable, else on PATH.
+/// The CLI that makes changes: this very binary (`$INGRAIN_BIN` overrides it, for tests).
 pub fn cli() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("INGRAIN_BIN")
+    std::env::var_os("INGRAIN_BIN")
         .map(PathBuf::from)
         .filter(|p| p.is_file())
-    {
-        return Some(p);
-    }
-    let name = if cfg!(windows) {
-        "ingrain.exe"
-    } else {
-        "ingrain"
-    };
-    if let Some(sibling) = std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(|d| d.join(name)))
-        && sibling.is_file()
-    {
-        return Some(sibling);
-    }
-    ingrain_core::process::find("ingrain")
+        .or_else(|| std::env::current_exe().ok())
 }
 
 /// Run `ingrain --repo <root> <args>` on a worker, streaming its output as [`Msg::Line`] when
@@ -63,10 +48,7 @@ pub fn exec_serial(bus: &Bus, root: Option<&Path>, args: &[String]) -> (bool, St
 /// Run the CLI and wait: whether it succeeded, and its output (stdout, then stderr).
 pub fn exec(bus: &Bus, root: Option<&Path>, args: &[String], stream: bool) -> (bool, String) {
     let Some(bin) = cli() else {
-        return (
-            false,
-            "ingrain isn't installed: put it on PATH or set INGRAIN_BIN".into(),
-        );
+        return (false, "can't find the ingrain executable".into());
     };
     let mut cmd = Command::new(bin);
     if let Some(root) = root {
@@ -179,12 +161,13 @@ pub fn source_target(root: Option<&Path>, source: &str) -> Option<String> {
 pub mod recents {
     use std::path::{Path, PathBuf};
 
-    fn file() -> Option<PathBuf> {
-        ingrain_core::layout::global_dir().map(|d| d.join("viewer.json"))
+    fn file(home: Option<&Path>) -> Option<PathBuf> {
+        home.map(|d| d.join("viewer.json"))
     }
 
-    pub fn load() -> Vec<PathBuf> {
-        let Some(text) = file().and_then(|f| std::fs::read_to_string(f).ok()) else {
+    /// From the global store `home` (`ingrain_core::layout::global_dir`, or a test's).
+    pub fn load(home: Option<&Path>) -> Vec<PathBuf> {
+        let Some(text) = file(home).and_then(|f| std::fs::read_to_string(f).ok()) else {
             return Vec::new();
         };
         let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
@@ -201,13 +184,14 @@ pub mod recents {
     }
 
     /// Put `root` first and save (on a worker: the caller is the UI thread).
-    pub fn push(list: &mut Vec<PathBuf>, root: &Path) {
+    pub fn push(list: &mut Vec<PathBuf>, root: &Path, home: Option<&Path>) {
+        let file = file(home);
         list.retain(|p| p != root);
         list.insert(0, root.to_path_buf());
         list.truncate(12);
         let list = list.clone();
         std::thread::spawn(move || {
-            let Some(f) = file() else { return };
+            let Some(f) = file else { return };
             if let Some(d) = f.parent() {
                 let _ = std::fs::create_dir_all(d);
             }

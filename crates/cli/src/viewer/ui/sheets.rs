@@ -1,7 +1,7 @@
 //! Dialogs over the window: supersede a decision, read a commit's change, watch a command run.
 
 use super::style;
-use crate::app::{App, Sheet};
+use crate::viewer::app::{App, Sheet};
 use rune::{El, ScrollSpec, Tx, col, el, row, text};
 use rune_kit::diff::DiffView;
 use rune_kit::{Button, ButtonVariant, Dialog, Kit, TextArea};
@@ -182,7 +182,7 @@ pub fn build(s: &App, k: &Kit, layer: &mut Vec<El>) {
                                 .on_press_tx(move |s: &mut App, _tx: &mut Tx| {
                                     s.sheet = None;
                                     if !running {
-                                        s.set_lens(crate::app::Lens::Inbox);
+                                        s.set_lens(crate::viewer::app::Lens::Inbox);
                                     }
                                 })
                                 .build(k)
